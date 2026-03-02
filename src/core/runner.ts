@@ -99,6 +99,16 @@ export class TaskRunner extends EventEmitter {
         maxCostPerTask: projectConfig.claude?.maxCostPerTask,
       });
 
+      logger.info(
+        {
+          taskId: task.id,
+          command: agentCmd.command,
+          args: agentCmd.args,
+          cwd: worktree.path,
+        },
+        "Executing agent command",
+      );
+
       // Spawn agent process
       const child = spawn(agentCmd.command, agentCmd.args, {
         cwd: worktree.path,
