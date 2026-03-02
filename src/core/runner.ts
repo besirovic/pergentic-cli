@@ -110,6 +110,29 @@ export class TaskRunner extends EventEmitter {
         stdio: ["ignore", "pipe", "pipe"],
       });
 
+      // Capture agent output for error reporting
+      const stderrChunks: Buffer[] = [];
+      const stdoutChunks: Buffer[] = [];
+      const MAX_OUTPUT = 8192; // Keep last 8KB of output
+      let stderrLen = 0;
+      let stdoutLen = 0;
+
+      child.stderr?.on("data", (chunk: Buffer) => {
+        stderrChunks.push(chunk);
+        stderrLen += chunk.length;
+        while (stderrLen > MAX_OUTPUT && stderrChunks.length > 1) {
+          stderrLen -= stderrChunks.shift()!.length;
+        }
+      });
+
+      child.stdout?.on("data", (chunk: Buffer) => {
+        stdoutChunks.push(chunk);
+        stdoutLen += chunk.length;
+        while (stdoutLen > MAX_OUTPUT && stdoutChunks.length > 1) {
+          stdoutLen -= stdoutChunks.shift()!.length;
+        }
+      });
+
       const activeTask: ActiveTask = {
         task,
         process: child,
@@ -121,6 +144,8 @@ export class TaskRunner extends EventEmitter {
       this.emit("taskStarted", task);
 
       child.on("close", async (exitCode) => {
+        const stderr = Buffer.concat(stderrChunks).toString("utf-8").trim();
+        const stdout = Buffer.concat(stdoutChunks).toString("utf-8").trim();
         this.active.delete(task.id);
         const duration = Math.floor((Date.now() - startTime) / 1000);
 
@@ -171,24 +196,32 @@ export class TaskRunner extends EventEmitter {
             );
           } catch (err) {
             this.emit("taskFailed", task, err);
-            logger.error({ taskId: task.id, err }, "Post-agent steps failed");
+            logger.error(
+              { taskId: task.id, err, stderr: stderr.slice(-2000), stdout: stdout.slice(-2000) },
+              "Post-agent steps failed",
+            );
             recordTaskCost(payload.taskId, 0, duration, false, true);
           }
         } else {
           recordTaskCost(payload.taskId, 0, duration, false, true);
+
+          // Build a useful error message from agent output
+          const lastStderr = stderr.slice(-2000);
+          const lastStdout = stdout.slice(-2000);
+          const errorDetail = lastStderr || lastStdout || "No output captured";
 
           const event: TaskEvent = {
             type: "taskFailed",
             taskId: payload.taskId,
             title: payload.title,
             project: projectName,
-            error: `Agent exited with code ${exitCode}`,
+            error: `Agent exited with code ${exitCode}: ${errorDetail.slice(0, 500)}`,
             duration,
           };
           await notify(event, this.globalConfig);
           this.emit("taskFailed", task, new Error(`Exit code: ${exitCode}`));
           logger.error(
-            { taskId: task.id, exitCode, duration },
+            { taskId: task.id, exitCode, duration, stderr: lastStderr, stdout: lastStdout },
             "Task failed",
           );
         }
