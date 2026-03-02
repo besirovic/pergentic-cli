@@ -12,6 +12,7 @@ import {
 	ensureGlobalConfigDir,
 } from "../config/loader";
 import { projectConfigPath } from "../config/paths";
+import { ensureRepoClone } from "../core/worktree";
 import type { ProjectConfig } from "../config/schema";
 
 type AgentNameType = ProjectConfig["configuredAgents"][number];
@@ -515,6 +516,23 @@ export async function init(projectPath?: string): Promise<void> {
 	if (!registry.projects.some((p) => resolve(p.path) === absPath)) {
 		registry.projects.push({ path: absPath });
 		saveProjectsRegistry(registry);
+	}
+
+	// Clone repo into workspaces dir for worktree-based task execution
+	if (config.repo) {
+		const projectName = absPath.split("/").pop() ?? "project";
+		try {
+			console.log(`  ${chalk.dim("Cloning repo for task execution...")}`);
+			await ensureRepoClone(projectName, config.repo, config.branch);
+			console.log(`  ${chalk.green("✓")} Repo cloned for worktree use`);
+		} catch (err) {
+			console.log(
+				`  ${chalk.yellow("⚠")} Failed to clone repo: ${err instanceof Error ? err.message : err}`
+			);
+			console.log(
+				`  ${chalk.dim("  The daemon will not be able to create worktrees until this is resolved.")}`
+			);
+		}
 	}
 
 	console.log(`  ${chalk.green("Config saved to")} ${configFile}`);

@@ -21,9 +21,11 @@ export interface TaskPayload {
 export class TaskQueue {
   private tasks: Task[] = [];
   private seen = new Set<string>();
+  private failed = new Set<string>();
 
   add(task: Task): boolean {
     if (this.seen.has(task.id)) return false;
+    if (this.failed.has(task.id)) return false;
     this.seen.add(task.id);
     this.tasks.push(task);
     this.tasks.sort((a, b) => a.priority - b.priority);
@@ -34,6 +36,15 @@ export class TaskQueue {
     const task = this.tasks.shift();
     if (task) this.seen.delete(task.id);
     return task;
+  }
+
+  markFailed(id: string): void {
+    this.failed.add(id);
+    this.seen.delete(id);
+  }
+
+  isKnownFailed(id: string): boolean {
+    return this.failed.has(id);
   }
 
   peek(): Task | undefined {

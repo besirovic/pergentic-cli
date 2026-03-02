@@ -139,9 +139,14 @@ export class Poller {
             (p) => basename(p.path) === task.project,
           )?.path ?? "",
         );
-        await this.runner.run(task, projectConfig);
+        const started = await this.runner.run(task, projectConfig);
+        if (!started) {
+          this.queue.markFailed(task.id);
+          logger.error({ taskId: task.id }, "Task failed to start, will not retry");
+        }
       } catch (err) {
-        logger.error({ taskId: task.id, err }, "Failed to dispatch task");
+        this.queue.markFailed(task.id);
+        logger.error({ taskId: task.id, err }, "Failed to dispatch task, will not retry");
       }
     }
   }

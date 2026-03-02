@@ -1,11 +1,13 @@
-import { resolve } from "node:path";
+import { resolve, basename } from "node:path";
 import { existsSync } from "node:fs";
 import {
 	loadProjectsRegistry,
 	saveProjectsRegistry,
+	loadProjectConfig,
 	ensureGlobalConfigDir,
 } from "../config/loader";
 import { projectConfigPath } from "../config/paths";
+import { ensureRepoClone } from "../core/worktree";
 
 export async function add(projectPath: string): Promise<void> {
 	const absPath = resolve(projectPath);
@@ -43,5 +45,19 @@ export async function add(projectPath: string): Promise<void> {
 	// Config exists, just register the project
 	registry.projects.push({ path: absPath });
 	saveProjectsRegistry(registry);
+
+	// Ensure repo is cloned for worktree use
+	const config = loadProjectConfig(absPath);
+	if (config.repo) {
+		const projectName = basename(absPath);
+		try {
+			await ensureRepoClone(projectName, config.repo, config.branch);
+		} catch (err) {
+			console.log(
+				`⚠️  Failed to clone repo: ${err instanceof Error ? err.message : err}`,
+			);
+		}
+	}
+
 	console.log(`✅ Registered project: ${absPath}`);
 }

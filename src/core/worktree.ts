@@ -1,6 +1,6 @@
 import simpleGit from "simple-git";
 import { existsSync, mkdirSync, readdirSync, statSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { worktreesDir, repoDir } from "../config/paths";
 import { logger } from "../utils/logger";
 
@@ -10,6 +10,27 @@ function slugify(text: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 50);
+}
+
+export async function ensureRepoClone(
+  projectName: string,
+  remoteUrl: string,
+  baseBranch: string,
+): Promise<string> {
+  const repo = repoDir(projectName);
+
+  if (existsSync(join(repo, ".git")) || existsSync(join(repo, "HEAD"))) {
+    return repo;
+  }
+
+  const parentDir = dirname(repo);
+  if (!existsSync(parentDir)) mkdirSync(parentDir, { recursive: true });
+
+  logger.info({ projectName, repo, remoteUrl }, "Cloning repo for worktree use");
+  const git = simpleGit();
+  await git.clone(remoteUrl, repo, ["--branch", baseBranch]);
+
+  return repo;
 }
 
 export interface WorktreeInfo {

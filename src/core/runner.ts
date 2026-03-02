@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { resolveAgent } from "../agents/resolve-agent";
-import { createWorktree, removeWorktree, type WorktreeInfo } from "./worktree";
+import { createWorktree, ensureRepoClone, removeWorktree, type WorktreeInfo } from "./worktree";
 import { commitAll, pushBranch, createPR, amendAndForcePush, pullBranch } from "./git";
 import { initHistory, addFeedbackRound, buildFeedbackPrompt, loadHistory } from "./feedback";
 import { notify, type TaskEvent } from "./notify";
@@ -49,6 +49,9 @@ export class TaskRunner extends EventEmitter {
     );
 
     try {
+      // Ensure repo is cloned before creating worktrees
+      await ensureRepoClone(projectName, projectConfig.repo, projectConfig.branch);
+
       // Create or reuse worktree
       const worktree = await createWorktree(
         projectName,

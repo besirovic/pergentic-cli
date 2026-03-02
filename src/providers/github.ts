@@ -76,6 +76,8 @@ export class GitHubProvider implements TaskProvider {
             },
           });
         }
+      } else {
+        logger.error({ status: res.status, statusText: res.statusText }, "GitHub issues API error");
       }
     } catch (err) {
       logger.error({ err }, "Failed to poll GitHub issues");
@@ -109,6 +111,8 @@ export class GitHubProvider implements TaskProvider {
             },
           });
         }
+      } else {
+        logger.error({ status: res.status, statusText: res.statusText }, "GitHub PR comments API error");
       }
     } catch (err) {
       logger.error({ err }, "Failed to poll GitHub PR comments");
