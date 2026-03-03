@@ -8,6 +8,31 @@ Developers spend significant time on the cycle of picking up a ticket, creating 
 
 ## How It Works
 
+```
+Ticket → "In Progress"
+        │
+        ▼
+  Daemon polls task source (every 30s)
+        │
+        ▼
+  Creates isolated git worktree
+        │
+        ▼
+  Spawns coding agent (Claude Code / Codex / Aider / OpenCode)
+        │
+        ▼
+  Agent implements the task
+        │
+        ▼
+  Commits, pushes, creates PR
+        │
+        ▼
+  Updates ticket status → Sends notification
+        │
+        ▼
+  Listens for PR review comments ──► Re-runs agent with feedback
+```
+
 1. You move a ticket to "In Progress" in Linear, GitHub, or Slack
 2. Pergentic's daemon detects the change (polls every 30s)
 3. A git worktree is created for isolated work
@@ -212,6 +237,20 @@ feedback:
   maxRounds: 5
 ```
 
+## Environment Variables
+
+API keys can also be provided via environment variables instead of (or in addition to) config files:
+
+| Variable | Description |
+|---|---|
+| `ANTHROPIC_API_KEY` | Anthropic API key for Claude Code |
+| `OPENAI_API_KEY` | OpenAI API key for Codex |
+| `OPENROUTER_API_KEY` | OpenRouter API key (multi-provider) |
+| `GITHUB_TOKEN` | GitHub personal access token |
+| `LINEAR_API_KEY` | Linear API key |
+
+Set `agentProviders.<agent>: env` in your project config to use environment variables for that agent.
+
 ## Supported Agents
 
 | Agent | Provider | Description |
@@ -312,6 +351,42 @@ pergentic logs -n 20
 # Retry the failed task
 pergentic retry PER-42
 ```
+
+## File System Layout
+
+Pergentic stores its data under `~/.pergentic/`:
+
+```
+~/.pergentic/
+├── config.yaml          # Global configuration (API keys, polling, notifications)
+├── projects.yaml        # List of registered projects
+├── daemon.pid           # PID of the running daemon
+├── daemon.log           # Daemon logs (JSON/Pino format)
+├── state.json           # Live daemon state (status, uptime, active tasks)
+├── stats.json           # Cost tracking and daily statistics
+└── workspaces/
+    └── <project>/
+        ├── repo/            # Cached repository clone
+        └── worktrees/
+            ├── TASK-123/    # Isolated worktree for task TASK-123
+            └── TASK-456/    # Isolated worktree for task TASK-456
+```
+
+Each project also has a `.pergentic/config.yaml` in its root directory for project-specific settings.
+
+## Tech Stack
+
+| Component | Technology |
+|---|---|
+| Language | TypeScript (ES2022, ESM) |
+| CLI framework | Commander.js |
+| Configuration | YAML + Zod validation |
+| TUI dashboard | Ink (React for the terminal) |
+| Interactive prompts | Inquirer |
+| Git operations | simple-git |
+| Logging | Pino |
+| Bundler | tsup |
+| Tests | Vitest |
 
 ## Development
 
