@@ -248,8 +248,9 @@ API keys can also be provided via environment variables instead of (or in additi
 | `OPENROUTER_API_KEY` | OpenRouter API key (multi-provider) |
 | `GITHUB_TOKEN` | GitHub personal access token |
 | `LINEAR_API_KEY` | Linear API key |
+| `PERGENTIC_HOME` | Override default data directory (`~/.pergentic`) |
 
-Set `agentProviders.<agent>: env` in your project config to use environment variables for that agent.
+These can also be placed in `~/.pergentic/.env`. Project-level API keys in `.pergentic/config.yaml` take precedence over global keys and environment variables.
 
 ## Supported Agents
 
