@@ -378,6 +378,32 @@ pergentic logs -f --project my-app
 pergentic dashboard
 ```
 
+### Multi-project setup
+
+Register several repositories and manage them all from a single daemon:
+
+```bash
+pergentic add ~/projects/api-service
+pergentic add ~/projects/web-frontend
+pergentic add ~/projects/mobile-app
+
+pergentic list         # See all registered projects
+pergentic start        # One daemon handles everything
+pergentic dashboard    # Monitor all projects in one view
+```
+
+### Slack-driven workflow
+
+Bind Slack channels to projects so team members can request work via chat:
+
+```yaml
+# .pergentic/config.yaml
+slack:
+  channels:
+    "#backend-dev": api-service
+    "#frontend-dev": web-frontend
+```
+
 ### Retry a failed task
 
 ```bash
