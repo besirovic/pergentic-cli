@@ -253,20 +253,22 @@ Set `agentProviders.<agent>: env` in your project config to use environment vari
 
 ## Supported Agents
 
-| Agent | Provider | Description |
+| Agent | Provider | Command |
 |---|---|---|
-| `claude-code` | Anthropic | Full-featured coding agent with tool access |
-| `codex` | OpenAI | Code generation specialized agent |
-| `aider` | Multiple | Multi-provider, editor-based agent |
-| `opencode` | Multiple | Alternative multi-provider agent |
+| `claude-code` | Anthropic | `claude -p "{prompt}" --allowedTools Edit,Read,Write,Bash` |
+| `codex` | OpenAI | `codex "{prompt}"` |
+| `aider` | OpenAI, Anthropic, OpenRouter | `aider --message "{prompt}" --yes` |
+| `opencode` | OpenAI, Anthropic | `opencode run "{prompt}" --tool edit --tool bash` |
+
+Each agent is a thin adapter that builds CLI arguments. Tools and cost limits are configurable per agent via the project config (`agentTools`, `claude.maxCostPerTask`).
 
 ## Supported Task Providers
 
 | Provider | Trigger | Features |
 |---|---|---|
-| **Linear** | Task moved to "In Progress" | Status updates, team filtering |
-| **GitHub** | Issue labeled or assigned | PR creation, comment detection |
-| **Slack** | Message or slash command | Channel-based task triggers |
+| **Linear** | Task moved to "In Progress" | Auto status updates, team filtering via `linearTeamId` |
+| **GitHub** | Issue assigned | PR creation, review comment detection for feedback |
+| **Slack** | `@pergentic` mention | Channel-to-project mapping, thread replies |
 
 ## Feedback Loop
 
