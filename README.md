@@ -407,6 +407,15 @@ slack:
     "#frontend-dev": web-frontend
 ```
 
+Then in Slack:
+
+```
+@pergentic fix the login page redirect bug
+@pergentic in api-service add rate limiting to the /users endpoint
+```
+
+Pergentic responds in the thread with progress updates and the PR link.
+
 ### Retry a failed task
 
 ```bash
@@ -458,7 +467,7 @@ Each project also has a `.pergentic/config.yaml` in its root directory for proje
 ### Setup
 
 ```bash
-git clone https://github.com/AdemirBesworked/pergentic-cli.git
+git clone git@github.com:besirovic/pergentic-cli.git
 cd pergentic-cli
 npm install
 ```
