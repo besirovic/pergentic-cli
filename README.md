@@ -280,6 +280,42 @@ Pergentic tracks feedback history in each worktree (`.claude-history.json`). Whe
 
 This continues for up to `feedback.maxRounds` iterations (default: 5).
 
+## Notifications
+
+Pergentic can notify your team via Slack or Discord when tasks complete, fail, or produce PRs. Configure webhooks in the global config:
+
+```yaml
+# ~/.pergentic/config.yaml
+notifications:
+  slack:
+    webhook: https://hooks.slack.com/services/T00/B00/xxx
+    on:
+      taskCompleted: true
+      taskFailed: true
+      prCreated: true
+  discord:
+    webhook: https://discord.com/api/webhooks/xxx/yyy
+    on:
+      taskFailed: true
+```
+
+## Cost Tracking
+
+Pergentic tracks execution costs per task and aggregates daily statistics in `~/.pergentic/stats.json`. View summaries with `pergentic status`:
+
+```
+● Pergentic: running · Uptime 2h 34m · 1 projects · 0 active tasks
+  Today: 5 tasks · 3 PRs · 0 failed · $2.45 cost
+```
+
+Set a per-task spending limit to prevent runaway costs:
+
+```yaml
+# .pergentic/config.yaml
+claude:
+  maxCostPerTask: 5.00   # Kill agent if cost exceeds $5
+```
+
 ## Remote Monitoring
 
 Monitor a remote Pergentic instance over SSH:
