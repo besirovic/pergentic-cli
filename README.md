@@ -507,6 +507,14 @@ npm link
 pergentic --version
 ```
 
+## Design Decisions
+
+- **Polling over webhooks** — No public URL or tunnel required. Works behind firewalls, NATs, and corporate VPNs. 30-second latency is acceptable for CI-like workflows.
+- **Git worktrees over branches** — Each task gets a fully isolated directory. Multiple agents can run in parallel without conflicts, and worktrees persist for feedback iterations.
+- **In-memory queue** — No external dependencies like Redis. State is ephemeral — if the daemon restarts, providers simply re-poll and rediscover active tasks.
+- **Modular agent adapters** — Each coding agent is a thin wrapper that builds CLI arguments. Adding a new agent means implementing a single interface.
+- **Per-project + global config** — API keys live in the global config (shared), while agent selection, PR templates, and integrations are per-project. Project keys can override global ones.
+
 ## License
 
 MIT
