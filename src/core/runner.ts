@@ -93,9 +93,12 @@ export class TaskRunner extends EventEmitter {
 
       // Resolve agent
       const agent = resolveAgent(projectConfig.agent);
+      const allowedTools = projectConfig.agentTools?.[projectConfig.agent]
+        ?? projectConfig.claude?.allowedTools;
+
       const agentCmd = agent.buildCommand(prompt, worktree.path, {
         instructions: projectConfig.claude?.instructions,
-        allowedTools: projectConfig.claude?.allowedTools,
+        allowedTools,
         maxCostPerTask: projectConfig.claude?.maxCostPerTask,
       });
 
@@ -180,10 +183,12 @@ export class TaskRunner extends EventEmitter {
               const pr = await createPR(worktree.path, {
                 repo: projectConfig.repo,
                 branch: worktree.branch,
+                baseBranch: projectConfig.branch,
                 title: prTitle,
                 body: prBody,
                 labels: prConfig?.labels,
                 reviewers: prConfig?.reviewers,
+                githubToken: projectConfig.githubToken ?? "",
               });
 
               recordTaskCost(payload.taskId, 0, duration, true, false);

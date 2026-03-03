@@ -1,6 +1,17 @@
 import simpleGit from "simple-git";
-import { spawnAsync } from "../utils/process";
 import { logger } from "../utils/logger";
+
+function parseOwnerRepo(repo: string): { owner: string; repo: string } {
+  // Handle HTTPS: https://github.com/owner/repo.git
+  const httpsMatch = repo.match(/github\.com\/([^/]+)\/([^/.]+)/);
+  if (httpsMatch) return { owner: httpsMatch[1], repo: httpsMatch[2] };
+
+  // Handle SSH: git@github.com:owner/repo.git
+  const sshMatch = repo.match(/github\.com:([^/]+)\/([^/.]+)/);
+  if (sshMatch) return { owner: sshMatch[1], repo: sshMatch[2] };
+
+  throw new Error(`Cannot parse owner/repo from: ${repo}`);
+}
 
 export async function commitAll(
   worktreePath: string,
@@ -35,10 +46,12 @@ export async function amendAndForcePush(
 export interface PROptions {
   repo: string;
   branch: string;
+  baseBranch?: string;
   title: string;
   body: string;
   labels?: string[];
   reviewers?: string[];
+  githubToken: string;
 }
 
 export interface PRResult {
@@ -47,59 +60,97 @@ export interface PRResult {
 }
 
 export async function createPR(
-  worktreePath: string,
+  _worktreePath: string,
   options: PROptions,
 ): Promise<PRResult> {
-  const args = [
-    "pr",
-    "create",
-    "--title",
-    options.title,
-    "--body",
-    options.body,
-    "--head",
-    options.branch,
-  ];
+  const { owner, repo } = parseOwnerRepo(options.repo);
 
+  const response = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/pulls`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${options.githubToken}`,
+        Accept: "application/vnd.github+json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        title: options.title,
+        body: options.body,
+        head: options.branch,
+        base: options.baseBranch ?? "main",
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Failed to create PR (${response.status}): ${errorBody}`);
+  }
+
+  const data = (await response.json()) as { html_url: string; number: number };
+
+  // Add labels if specified
   if (options.labels?.length) {
-    for (const label of options.labels) {
-      args.push("--label", label);
-    }
+    await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/issues/${data.number}/labels`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${options.githubToken}`,
+          Accept: "application/vnd.github+json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ labels: options.labels }),
+      },
+    );
   }
 
+  // Add reviewers if specified
   if (options.reviewers?.length) {
-    for (const reviewer of options.reviewers) {
-      args.push("--reviewer", reviewer);
-    }
+    await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/pulls/${data.number}/requested_reviewers`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${options.githubToken}`,
+          Accept: "application/vnd.github+json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ reviewers: options.reviewers }),
+      },
+    );
   }
 
-  const result = await spawnAsync("gh", args, { cwd: worktreePath });
-
-  if (result.exitCode !== 0) {
-    throw new Error(`Failed to create PR: ${result.stderr}`);
-  }
-
-  const url = result.stdout.trim();
-  const prNumber = parseInt(url.split("/").pop() ?? "0", 10);
-
-  logger.info({ url, prNumber, branch: options.branch }, "Created PR");
-  return { url, number: prNumber };
+  logger.info({ url: data.html_url, prNumber: data.number, branch: options.branch }, "Created PR");
+  return { url: data.html_url, number: data.number };
 }
 
 export async function replyToPRComment(
   repo: string,
   prNumber: number,
   body: string,
+  githubToken: string,
 ): Promise<void> {
-  await spawnAsync("gh", [
-    "pr",
-    "comment",
-    String(prNumber),
-    "--repo",
-    repo,
-    "--body",
-    body,
-  ]);
+  const { owner, repo: repoName } = parseOwnerRepo(repo);
+
+  const response = await fetch(
+    `https://api.github.com/repos/${owner}/${repoName}/issues/${prNumber}/comments`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${githubToken}`,
+        Accept: "application/vnd.github+json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ body }),
+    },
+  );
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Failed to comment on PR (${response.status}): ${errorBody}`);
+  }
 }
 
 export async function pullBranch(

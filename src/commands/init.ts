@@ -13,6 +13,7 @@ import {
 } from "../config/loader";
 import { projectConfigPath } from "../config/paths";
 import { ensureRepoClone } from "../core/worktree";
+import { resolveAgent } from "../agents/resolve-agent";
 import type { ProjectConfig } from "../config/schema";
 
 type AgentNameType = ProjectConfig["configuredAgents"][number];
@@ -354,6 +355,75 @@ async function promptForApiKey(
 	console.log();
 }
 
+// --- Wizard step: Configure agent tools ---
+
+const AGENTS_WITH_TOOLS: AgentNameType[] = ["claude-code", "codex", "opencode"];
+
+async function wizardStepConfigureTools(
+	selectedAgents: AgentNameType[],
+	config: ProjectConfig,
+): Promise<void> {
+	const toolAgents = selectedAgents.filter((a) => AGENTS_WITH_TOOLS.includes(a));
+	if (toolAgents.length === 0) return;
+
+	console.log(chalk.bold("\n  Step 4: Configure Agent Tools\n"));
+
+	if (!config.agentTools) {
+		config.agentTools = {};
+	}
+
+	for (const agentName of toolAgents) {
+		const agent = resolveAgent(agentName);
+		if (agent.tools.length === 0) continue;
+
+		const defaultTools = agent.tools.filter((t) => t.default).map((t) => t.name);
+		const defaultLabel = defaultTools.length > 0
+			? chalk.dim(` (${defaultTools.join(", ")})`)
+			: "";
+
+		const mode = await select<"default" | "custom">({
+			message: `${agentDisplayName(agentName)} tools:`,
+			choices: [
+				{
+					name: `Default${defaultLabel}`,
+					value: "default" as const,
+				},
+				{
+					name: "Custom (choose individually)",
+					value: "custom" as const,
+				},
+			],
+			theme: promptTheme,
+		});
+
+		if (mode === "default") {
+			config.agentTools[agentName] = defaultTools;
+			console.log(
+				chalk.green(`  Using default tools for ${agentDisplayName(agentName)}\n`)
+			);
+		} else {
+			const existingTools = config.agentTools[agentName] ?? defaultTools;
+
+			const selected = await checkbox<string>({
+				message: `Select tools for ${agentDisplayName(agentName)}:`,
+				choices: agent.tools.map((t) => ({
+					name: `${t.name.padEnd(16)} ${chalk.dim(t.description)}`,
+					value: t.name,
+					checked: existingTools.includes(t.name),
+				})),
+				validate: (items) =>
+					items.length > 0 ? true : "Select at least one tool",
+				theme: promptTheme,
+			});
+
+			config.agentTools[agentName] = selected;
+			console.log(
+				chalk.green(`  ${selected.length} tools enabled for ${agentDisplayName(agentName)}\n`)
+			);
+		}
+	}
+}
+
 // --- Main init function ---
 
 export async function init(projectPath?: string): Promise<void> {
@@ -414,7 +484,10 @@ export async function init(projectPath?: string): Promise<void> {
 		// Step 3: Configure API keys per agent
 		await wizardStep3ConfigureKeys(selectedAgents, config);
 
-		// --- Step 4: Remaining integrations (menu-based) ---
+		// Step 4: Configure agent tools
+		await wizardStepConfigureTools(selectedAgents, config);
+
+		// --- Step 5: Remaining integrations (menu-based) ---
 		let continueMenu = true;
 		while (continueMenu) {
 			clearScreen();
@@ -483,6 +556,16 @@ export async function init(projectPath?: string): Promise<void> {
 	// Summary
 	console.log(`  ${chalk.green("✓")} Agents: ${chalk.white(config.configuredAgents.map(agentDisplayName).join(", "))}`);
 	console.log(`  ${chalk.green("✓")} Default: ${chalk.white(agentDisplayName(config.agent))}`);
+
+	if (config.agentTools) {
+		for (const [agentName, tools] of Object.entries(config.agentTools)) {
+			if (tools.length > 0) {
+				console.log(
+					`  ${chalk.green("✓")} ${agentDisplayName(agentName as AgentNameType)} tools: ${chalk.white(tools.join(", "))}`
+				);
+			}
+		}
+	}
 
 	const configuredIntegrations = menuCategories.filter(
 		(c) => c.isConfigured(config) && c.id !== "project-settings"
