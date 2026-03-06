@@ -7,7 +7,9 @@ import { TaskQueue } from "./core/queue";
 import { TaskRunner } from "./core/runner";
 import { Poller } from "./core/poller";
 import { DispatchLedger } from "./core/ledger";
+import { Scheduler } from "./core/scheduler";
 import { acquireLock, releaseLock } from "./utils/health";
+import type { Task } from "./core/queue";
 
 const logger = createLogger("daemon");
 let shuttingDown = false;
@@ -41,6 +43,22 @@ async function main(): Promise<void> {
 	const poller = new Poller(queue, runner, {
 		pollInterval: config.pollInterval,
 	}, ledger);
+
+	// Initialize scheduler and wire to poller
+	const scheduler = new Scheduler(queue, runner);
+	poller.setAfterPollHook(() => scheduler.checkDue());
+
+	// Clear scheduler active set when scheduled tasks complete or fail
+	runner.on("taskCompleted", (task: Task) => {
+		if (task.type === "scheduled" && task.payload.scheduleId) {
+			scheduler.clearActive(task.payload.scheduleId);
+		}
+	});
+	runner.on("taskFailed", (task: Task) => {
+		if (task.type === "scheduled" && task.payload.scheduleId) {
+			scheduler.clearActive(task.payload.scheduleId);
+		}
+	});
 
 	// State file update loop
 	const stateInterval = setInterval(() => {

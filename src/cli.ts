@@ -160,6 +160,51 @@ export function createProgram(): Command {
 			await serviceInstall();
 		});
 
+	const scheduleCmd = program.command("schedule").description("Manage scheduled recurring tasks");
+
+	scheduleCmd.command("add")
+		.description("Create a new scheduled task")
+		.argument("[path]", "Project directory", process.cwd())
+		.action(async (projectPath: string) => {
+			const { scheduleAdd } = await import("./commands/schedule.js");
+			await scheduleAdd(projectPath);
+		});
+
+	scheduleCmd.command("list")
+		.description("List all scheduled tasks")
+		.argument("[path]", "Project directory", process.cwd())
+		.action(async (projectPath: string) => {
+			const { scheduleList } = await import("./commands/schedule.js");
+			await scheduleList(projectPath);
+		});
+
+	scheduleCmd.command("remove")
+		.description("Remove a scheduled task")
+		.argument("<name>", "Schedule name or ID")
+		.option("--project <path>", "Project directory", process.cwd())
+		.action(async (name: string, opts: { project: string }) => {
+			const { scheduleRemove } = await import("./commands/schedule.js");
+			await scheduleRemove(name, opts.project);
+		});
+
+	scheduleCmd.command("pause")
+		.description("Pause a scheduled task")
+		.argument("<name>", "Schedule name or ID")
+		.option("--project <path>", "Project directory", process.cwd())
+		.action(async (name: string, opts: { project: string }) => {
+			const { schedulePause } = await import("./commands/schedule.js");
+			await schedulePause(name, opts.project);
+		});
+
+	scheduleCmd.command("resume")
+		.description("Resume a paused scheduled task")
+		.argument("<name>", "Schedule name or ID")
+		.option("--project <path>", "Project directory", process.cwd())
+		.action(async (name: string, opts: { project: string }) => {
+			const { scheduleResume } = await import("./commands/schedule.js");
+			await scheduleResume(name, opts.project);
+		});
+
 	return program;
 }
 

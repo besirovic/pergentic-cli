@@ -8,11 +8,12 @@ import { notify, type TaskEvent } from "./notify";
 import { postTaskComments, postVerificationFailureComment } from "./comments";
 import { recordTaskCost } from "./cost";
 import { recordEvent } from "./events";
-import { spawnAgentAndWait, runVerificationCommands, buildVerificationFixPrompt } from "./verify";
+import { spawnAgentAndWait, runVerificationCommands, buildVerificationFixPrompt, execCommand } from "./verify";
 import { logger } from "../utils/logger";
 import type { Task } from "./queue";
 import { AgentName } from "../config/schema";
 import type { GlobalConfig, ProjectConfig } from "../config/schema";
+import simpleGit from "simple-git";
 
 export interface RunnerConfig {
   maxConcurrent: number;
@@ -56,10 +57,16 @@ export class TaskRunner extends EventEmitter {
       // Ensure repo is cloned before creating worktrees
       await ensureRepoClone(projectName, projectConfig.repo, projectConfig.branch);
 
-      // Create or reuse worktree
+      // Create or reuse worktree — use stable branch for scheduled update PRs
+      const worktreeTaskId = (task.type === "scheduled"
+        && payload.schedulePrBehavior === "update"
+        && payload.schedulePrBranch)
+          ? payload.schedulePrBranch
+          : payload.taskId;
+
       const worktree = await createWorktree(
         projectName,
-        payload.taskId,
+        worktreeTaskId,
         payload.title,
         projectConfig.branch,
       );
@@ -80,6 +87,12 @@ export class TaskRunner extends EventEmitter {
           history,
           payload.comment ?? "",
         );
+      } else if (task.type === "scheduled" && payload.scheduledCommand) {
+        // Command-type scheduled task — run in worktree
+        return this.runScheduledCommand(task, projectConfig, projectName, worktree, startTime);
+      } else if (task.type === "scheduled" && !payload.scheduledCommand) {
+        // Prompt-type scheduled task — description IS the full prompt
+        prompt = payload.description;
       } else {
         // Initialize feedback history for new tasks
         initHistory(worktree.path, payload.taskId, payload.description);
@@ -298,7 +311,10 @@ export class TaskRunner extends EventEmitter {
           }
 
           // Proceed with commit → push → PR flow
-          const commitMsg = `feat: ${payload.title} [${payload.taskId}]`;
+          const isScheduled = task.type === "scheduled";
+          const commitMsg = isScheduled
+            ? `chore(schedule): ${payload.title} [${payload.taskId}]`
+            : `feat: ${payload.title} [${payload.taskId}]`;
           await commitAll(worktree.path, commitMsg);
           await pushBranch(worktree.path, worktree.branch);
 
@@ -310,14 +326,18 @@ export class TaskRunner extends EventEmitter {
             ? ` [${prAgentName}/${payload.targetModelLabel}]`
             : (isLabelTriggered ? ` [${prAgentName}]` : "");
 
-          const prTitle = (prConfig?.titleFormat ?? "feat: {taskTitle} [{taskId}]")
-            .replace("{taskTitle}", payload.title)
-            .replace("{taskId}", payload.taskId)
-            + modelSuffix;
+          const prTitle = isScheduled
+            ? `chore(schedule): ${payload.title}`
+            : (prConfig?.titleFormat ?? "feat: {taskTitle} [{taskId}]")
+              .replace("{taskTitle}", payload.title)
+              .replace("{taskId}", payload.taskId)
+              + modelSuffix;
 
-          const prBody = (prConfig?.bodyTemplate ?? "Resolves {taskId}")
-            .replace("{taskTitle}", payload.title)
-            .replace("{taskId}", payload.taskId);
+          const prBody = isScheduled
+            ? `Automated scheduled task: **${payload.title}**\n\nSchedule: \`${payload.scheduleId}\``
+            : (prConfig?.bodyTemplate ?? "Resolves {taskId}")
+              .replace("{taskTitle}", payload.title)
+              .replace("{taskId}", payload.taskId);
 
           const pr = await createPR(worktree.path, {
             repo: projectConfig.repo,
@@ -476,6 +496,153 @@ export class TaskRunner extends EventEmitter {
 
   get activeCount(): number {
     return this.active.size;
+  }
+
+  private async runScheduledCommand(
+    task: Task,
+    projectConfig: ProjectConfig,
+    projectName: string,
+    worktree: WorktreeInfo,
+    startTime: number,
+  ): Promise<boolean> {
+    const { payload } = task;
+    const command = payload.scheduledCommand!;
+
+    const activeTask: ActiveTask = {
+      task,
+      process: null,
+      worktree,
+      startTime,
+    };
+    this.active.set(task.id, activeTask);
+    this.emit("taskStarted", task);
+
+    recordEvent({
+      timestamp: new Date().toISOString(),
+      type: "taskStarted",
+      taskId: payload.taskId,
+      project: projectName,
+      title: payload.title,
+    });
+
+    // Run async to not block
+    this.executeScheduledCommand(
+      task, projectConfig, projectName, worktree, command, startTime,
+    ).catch((err) => {
+      logger.error({ taskId: task.id, err }, "Unhandled error in scheduled command execution");
+    });
+
+    return true;
+  }
+
+  private async executeScheduledCommand(
+    task: Task,
+    projectConfig: ProjectConfig,
+    projectName: string,
+    worktree: WorktreeInfo,
+    command: string,
+    startTime: number,
+  ): Promise<void> {
+    const { payload } = task;
+    const agentEnv: Record<string, string | undefined> = {
+      ...(projectConfig.githubToken && { GITHUB_TOKEN: projectConfig.githubToken }),
+    };
+
+    try {
+      const result = await execCommand(command, worktree.path, agentEnv);
+      this.active.delete(task.id);
+      const duration = Math.floor((Date.now() - startTime) / 1000);
+
+      if (!result.success) {
+        const event: TaskEvent = {
+          type: "taskFailed",
+          taskId: payload.taskId,
+          title: payload.title,
+          project: projectName,
+          error: `Command failed: ${result.output.slice(-1000)}`,
+          duration,
+        };
+        await notify(event, this.globalConfig, projectConfig);
+        this.emit("taskFailed", task, new Error("Scheduled command failed"));
+        return;
+      }
+
+      // Check for changes
+      const git = simpleGit(worktree.path);
+      const status = await git.status();
+
+      if (status.files.length === 0) {
+        logger.info({ taskId: task.id }, "Scheduled command produced no changes, skipping PR");
+        this.emit("taskCompleted", task);
+        return;
+      }
+
+      // Commit, push, create PR
+      const commitMsg = `chore(schedule): ${payload.title} [${payload.taskId}]`;
+      await commitAll(worktree.path, commitMsg);
+      await pushBranch(worktree.path, worktree.branch);
+
+      const pr = await createPR(worktree.path, {
+        repo: projectConfig.repo,
+        branch: worktree.branch,
+        baseBranch: projectConfig.branch,
+        title: `chore(schedule): ${payload.title}`,
+        body: `Automated scheduled task: **${payload.title}**\n\nSchedule: \`${payload.scheduleId}\``,
+        labels: projectConfig.pr?.labels,
+        reviewers: projectConfig.pr?.reviewers,
+        githubToken: projectConfig.githubToken ?? "",
+      });
+
+      recordTaskCost(payload.taskId, 0, duration, true, false, {
+        project: projectName,
+        title: payload.title,
+        prUrl: pr.url,
+      });
+
+      recordEvent({
+        timestamp: new Date().toISOString(),
+        type: "prCreated",
+        taskId: payload.taskId,
+        project: projectName,
+        title: payload.title,
+        duration,
+        prUrl: pr.url,
+      });
+
+      const event: TaskEvent = {
+        type: "prCreated",
+        taskId: payload.taskId,
+        title: payload.title,
+        project: projectName,
+        prUrl: pr.url,
+        duration,
+      };
+      await notify(event, this.globalConfig, projectConfig);
+
+      this.emit("taskCompleted", task);
+      logger.info({ taskId: task.id, duration, prUrl: pr.url }, "Scheduled command task completed");
+    } catch (err) {
+      this.active.delete(task.id);
+      const duration = Math.floor((Date.now() - startTime) / 1000);
+      this.emit("taskFailed", task, err);
+      logger.error({ taskId: task.id, err }, "Scheduled command execution failed");
+
+      recordTaskCost(payload.taskId, 0, duration, false, true, {
+        project: projectName,
+        title: payload.title,
+        error: String(err),
+      });
+
+      const event: TaskEvent = {
+        type: "taskFailed",
+        taskId: payload.taskId,
+        title: payload.title,
+        project: projectName,
+        error: String(err),
+        duration,
+      };
+      await notify(event, this.globalConfig, projectConfig);
+    }
   }
 
   async waitForAll(timeoutMs: number = 300_000): Promise<void> {

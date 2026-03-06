@@ -1,8 +1,8 @@
 export interface Task {
   id: string;
   project: string;
-  priority: number; // 1=feedback (highest), 2=new task, 3=retry
-  type: "new" | "feedback" | "retry";
+  priority: number; // 1=feedback (highest), 2=new task, 3=retry, 4=scheduled
+  type: "new" | "feedback" | "retry" | "scheduled";
   payload: TaskPayload;
   createdAt: number;
 }
@@ -11,8 +11,12 @@ export interface TaskPayload {
   taskId: string;
   title: string;
   description: string;
-  source: "linear" | "github" | "slack";
+  source: "linear" | "github" | "slack" | "schedule";
   branch?: string;
+  scheduleId?: string;
+  scheduledCommand?: string;
+  schedulePrBehavior?: "new" | "update";
+  schedulePrBranch?: string | null;
   prNumber?: number;
   comment?: string;
   metadata?: Record<string, unknown>;

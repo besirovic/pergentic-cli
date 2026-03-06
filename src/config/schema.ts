@@ -99,6 +99,39 @@ const SlackProjectConfigSchema = z.object({
 	channels: z.record(z.string(), z.string()).optional(),
 });
 
+export const ScheduleType = z.enum(["prompt", "command"]);
+export const PRBehavior = z.enum(["new", "update"]);
+
+export const ScheduleEntrySchema = z.object({
+	id: z.string(),
+	name: z.string(),
+	cron: z.string(),
+	type: ScheduleType,
+	prompt: z.string().optional(),
+	agent: AgentName.optional(),
+	command: z.string().optional(),
+	branch: z.string().default("main"),
+	prBehavior: PRBehavior.default("new"),
+	prBranch: z.string().nullable().default(null),
+	enabled: z.boolean().default(true),
+	lastRun: z.string().nullable().default(null),
+	createdAt: z.string(),
+}).superRefine((val, ctx) => {
+	if (val.type === "prompt" && !val.prompt)
+		ctx.addIssue({ code: z.ZodIssueCode.custom, message: "prompt path required", path: ["prompt"] });
+	if (val.type === "command" && !val.command)
+		ctx.addIssue({ code: z.ZodIssueCode.custom, message: "command required", path: ["command"] });
+	if (val.prBehavior === "update" && !val.prBranch)
+		ctx.addIssue({ code: z.ZodIssueCode.custom, message: "prBranch required for update behavior", path: ["prBranch"] });
+});
+
+export const SchedulesConfigSchema = z.object({
+	schedules: z.array(ScheduleEntrySchema).default([]),
+});
+
+export type ScheduleEntry = z.infer<typeof ScheduleEntrySchema>;
+export type SchedulesConfig = z.infer<typeof SchedulesConfigSchema>;
+
 export const ProjectConfigSchema = z.object({
 	repo: z.string(),
 	branch: z.string().default("main"),

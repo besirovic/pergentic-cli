@@ -13,7 +13,7 @@ interface ExecResult {
   output: string;
 }
 
-function execCommand(
+export function execCommand(
   cmd: string,
   cwd: string,
   env: Record<string, string | undefined>,

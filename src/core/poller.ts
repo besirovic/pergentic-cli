@@ -21,6 +21,7 @@ export class Poller {
   private pollInterval: number;
   private running = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private afterPollHook: (() => Promise<void>) | null = null;
 
   constructor(
     queue: TaskQueue,
@@ -32,6 +33,10 @@ export class Poller {
     this.runner = runner;
     this.ledger = ledger;
     this.pollInterval = config.pollInterval * 1000;
+  }
+
+  setAfterPollHook(fn: () => Promise<void>): void {
+    this.afterPollHook = fn;
   }
 
   async start(): Promise<void> {
@@ -55,6 +60,7 @@ export class Poller {
     try {
       await this.pollAll();
       await this.dispatch();
+      if (this.afterPollHook) await this.afterPollHook();
     } catch (err) {
       logger.error({ err }, "Poll cycle error");
     }

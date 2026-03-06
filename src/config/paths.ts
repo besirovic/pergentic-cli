@@ -69,3 +69,15 @@ export function envFilePath(): string {
 export function dispatchedLedgerPath(): string {
 	return join(pergenticHome(), "dispatched.jsonl");
 }
+
+export function schedulesConfigPath(projectPath: string): string {
+	return join(projectPath, ".pergentic", "schedules.yaml");
+}
+
+export function schedulesDir(projectPath: string): string {
+	return join(projectPath, ".pergentic", "schedules");
+}
+
+export function schedulePromptPath(projectPath: string, relativePath: string): string {
+	return join(projectPath, ".pergentic", relativePath);
+}
