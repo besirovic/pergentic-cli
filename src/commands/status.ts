@@ -1,42 +1,14 @@
-import { existsSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { isRunning, readPid } from "../utils/health";
-import { stateFilePath } from "../config/paths";
 import { loadGlobalConfig } from "../config/loader";
-
-interface DaemonState {
-	status: string;
-	uptime: number;
-	projects: Array<{
-		name: string;
-		agent: string;
-		status: string;
-		lastActivity?: string;
-	}>;
-	activeTasks: unknown[];
-	todayStats: {
-		tasks: number;
-		prs: number;
-		failed: number;
-		estimatedCost: number;
-	};
-}
+import { readState, type DaemonState } from "../utils/daemon-state";
+import { formatDuration } from "../utils/format";
 
 function formatUptime(seconds: number): string {
 	const h = Math.floor(seconds / 3600);
 	const m = Math.floor((seconds % 3600) / 60);
 	if (h > 0) return `${h}h ${m}m`;
 	return `${m}m`;
-}
-
-function readState(): DaemonState | null {
-	const path = stateFilePath();
-	if (!existsSync(path)) return null;
-	try {
-		return JSON.parse(readFileSync(path, "utf-8")) as DaemonState;
-	} catch {
-		return null;
-	}
 }
 
 async function fetchRemoteStatus(remoteName: string): Promise<void> {

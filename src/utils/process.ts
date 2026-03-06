@@ -1,7 +1,7 @@
 import { spawn, type SpawnOptions } from "node:child_process";
 
 export interface SpawnResult {
-  exitCode: number | null;
+  exitCode: number;
   stdout: string;
   stderr: string;
 }
@@ -12,6 +12,31 @@ export interface SpawnOpts {
   timeout?: number;
 }
 
+const WHITELISTED_ENV_KEYS = [
+  "PATH",
+  "HOME",
+  "SHELL",
+  "USER",
+  "LANG",
+  "LC_ALL",
+  "TERM",
+  "NODE_ENV",
+  "TMPDIR",
+  "XDG_RUNTIME_DIR",
+];
+
+export function buildSafeEnv(
+  overrides: Record<string, string | undefined> = {},
+): Record<string, string | undefined> {
+  const safe: Record<string, string | undefined> = {};
+  for (const key of WHITELISTED_ENV_KEYS) {
+    if (process.env[key] !== undefined) {
+      safe[key] = process.env[key];
+    }
+  }
+  return { ...safe, ...overrides };
+}
+
 export function spawnAsync(
   command: string,
   args: string[],
@@ -20,7 +45,7 @@ export function spawnAsync(
   return new Promise((resolve, reject) => {
     const spawnOpts: SpawnOptions = {
       cwd: opts.cwd,
-      env: { ...process.env, ...opts.env },
+      env: buildSafeEnv(opts.env),
       stdio: ["ignore", "pipe", "pipe"],
     };
 
@@ -56,7 +81,7 @@ export function spawnAsync(
         reject(new Error(`Process timed out after ${opts.timeout}ms`));
         return;
       }
-      resolve({ exitCode, stdout, stderr });
+      resolve({ exitCode: exitCode ?? 1, stdout, stderr });
     });
   });
 }

@@ -1,6 +1,7 @@
 import { getChangeSummary } from "./git";
 import { replyToPRComment } from "./git";
 import { logger } from "../utils/logger";
+import { fetchWithRetry } from "../utils/http";
 import type { ProjectConfig } from "../config/schema";
 import type { Task } from "./queue";
 
@@ -15,6 +16,9 @@ export interface CommentContext {
   task: Task;
 }
 
+const MAX_COMMENT_LENGTH = 65536;
+const MAX_VERIFICATION_OUTPUT_CHARS = 1500;
+
 function buildCommentBody(ctx: {
   taskId: string;
   taskTitle: string;
@@ -22,7 +26,7 @@ function buildCommentBody(ctx: {
   stats: string;
   prUrl: string;
 }): string {
-  return [
+  let body = [
     "## Changes from pergentic",
     "",
     `**Task:** ${ctx.taskId}: ${ctx.taskTitle}`,
@@ -36,6 +40,12 @@ function buildCommentBody(ctx: {
     "---",
     "*Automated by pergentic*",
   ].join("\n");
+
+  if (body.length > MAX_COMMENT_LENGTH) {
+    body = body.slice(0, MAX_COMMENT_LENGTH - 50) + "\n\n[Body truncated due to GitHub character limit]";
+  }
+
+  return body;
 }
 
 async function postLinearComment(
@@ -51,7 +61,7 @@ async function postLinearComment(
     }
   `;
 
-  const res = await fetch("https://api.linear.app/graphql", {
+  await fetchWithRetry("https://api.linear.app/graphql", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -62,10 +72,6 @@ async function postLinearComment(
       variables: { issueId: linearId, body },
     }),
   });
-
-  if (!res.ok) {
-    throw new Error(`Linear comment failed (${res.status})`);
-  }
 }
 
 async function postJiraComment(
@@ -77,7 +83,7 @@ async function postJiraComment(
 ): Promise<void> {
   const auth = Buffer.from(`${jiraEmail}:${jiraApiToken}`).toString("base64");
 
-  const res = await fetch(
+  await fetchWithRetry(
     `https://${jiraDomain}/rest/api/3/issue/${jiraIssueKey}/comment`,
     {
       method: "POST",
@@ -100,10 +106,6 @@ async function postJiraComment(
       }),
     },
   );
-
-  if (!res.ok) {
-    throw new Error(`Jira comment failed (${res.status})`);
-  }
 }
 
 export interface VerificationFailureContext {
@@ -124,7 +126,7 @@ export async function postVerificationFailureComment(ctx: VerificationFailureCon
     "",
     "**Last error output:**",
     "```",
-    ctx.output.slice(-1500),
+    ctx.output.slice(-MAX_VERIFICATION_OUTPUT_CHARS),
     "```",
     "",
     "The coding agent was unable to fix this issue after multiple attempts. Manual intervention is required.",

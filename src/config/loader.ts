@@ -1,6 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { existsSync, mkdirSync } from "node:fs";
 import {
   GlobalConfigSchema,
   ProjectConfigSchema,
@@ -16,18 +14,8 @@ import {
   globalConfigDir,
 } from "./paths";
 import { loadSecrets, SECRET_FIELDS } from "./env";
-
-function readYaml(filePath: string): unknown {
-  if (!existsSync(filePath)) return {};
-  const raw = readFileSync(filePath, "utf-8");
-  return parseYaml(raw) ?? {};
-}
-
-function writeYaml(filePath: string, data: unknown): void {
-  const dir = dirname(filePath);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(filePath, stringifyYaml(data), "utf-8");
-}
+import { readYaml, writeYaml } from "./yaml-io";
+import { logger } from "../utils/logger";
 
 export function loadGlobalConfig(): GlobalConfig {
   const raw = readYaml(globalConfigPath());
@@ -40,7 +28,20 @@ export function saveGlobalConfig(config: GlobalConfig): void {
 
 export function loadProjectConfig(projectPath: string): ProjectConfig {
   const configFile = projectConfigPath(projectPath);
-  const raw = readYaml(configFile);
+  const raw = readYaml(configFile) as Record<string, unknown>;
+
+  // Warn if secrets are found directly in config.yaml
+  const secretFieldNames = Object.keys(SECRET_FIELDS);
+  const foundSecrets = secretFieldNames.filter(
+    (field) => typeof raw[field] === "string" && (raw[field] as string).length > 0,
+  );
+  if (foundSecrets.length > 0) {
+    logger.warn(
+      { fields: foundSecrets },
+      "Secrets found in config.yaml — consider running `pergentic init` to migrate them to .env",
+    );
+  }
+
   const config = ProjectConfigSchema.parse(raw);
 
   // Merge env-based secrets: config values take precedence (backwards compat)

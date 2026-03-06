@@ -1,17 +1,23 @@
 import { createServer } from "node:http";
-import { writeFileSync, readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { createLogger } from "./utils/logger";
 import { stateFilePath, statsFilePath } from "./config/paths";
-import { loadGlobalConfig, ensureGlobalConfigDir } from "./config/loader";
+import { atomicWriteFile } from "./utils/fs";
+import { basename } from "node:path";
+import { loadGlobalConfig, loadProjectsRegistry, ensureGlobalConfigDir } from "./config/loader";
 import { TaskQueue } from "./core/queue";
 import { TaskRunner } from "./core/runner";
 import { Poller } from "./core/poller";
 import { DispatchLedger } from "./core/ledger";
 import { Scheduler } from "./core/scheduler";
 import { acquireLock, releaseLock } from "./utils/health";
+import { pruneStats } from "./core/cost";
+import { pruneEvents } from "./core/events";
 import type { Task } from "./core/queue";
 
 const logger = createLogger("daemon");
+const STATE_UPDATE_INTERVAL_MS = 3000;
+const SHUTDOWN_TIMEOUT_MS = 300_000;
 let shuttingDown = false;
 
 async function main(): Promise<void> {
@@ -32,6 +38,15 @@ async function main(): Promise<void> {
 	const ledger = new DispatchLedger();
 	ledger.load();
 
+	// Prune old data at startup
+	try {
+		ledger.prune(30);
+		pruneEvents(10000);
+		pruneStats(90);
+	} catch (err) {
+		logger.warn({ err }, "Failed to prune old data");
+	}
+
 	// Initialize queue and runner
 	const queue = new TaskQueue();
 	const runner = new TaskRunner({
@@ -48,10 +63,46 @@ async function main(): Promise<void> {
 	const scheduler = new Scheduler(queue, runner);
 	poller.setAfterPollHook(() => scheduler.checkDue());
 
-	// Clear scheduler active set when scheduled tasks complete or fail
-	runner.on("taskCompleted", (task: Task) => {
+	// Call provider onComplete when tasks complete, and clear scheduler active set
+	runner.on("taskCompleted", async (task: Task, meta?: { duration: number; projectConfig: import("./config/schema").ProjectConfig }) => {
 		if (task.type === "scheduled" && task.payload.scheduleId) {
 			scheduler.clearActive(task.payload.scheduleId);
+		}
+
+		// Call provider onComplete to update ticket status
+		if (meta?.projectConfig && task.payload.source) {
+			const projectConfig = meta.projectConfig;
+			const providers: import("./providers/types").TaskProvider[] = [];
+
+			if (task.payload.source === "linear" && projectConfig.linearApiKey) {
+				const { LinearProvider } = await import("./providers/linear.js");
+				providers.push(new LinearProvider(projectConfig.linearApiKey));
+			}
+
+			const projectEntry = loadProjectsRegistry().projects.find(
+				(p) => basename(p.path) === task.project,
+			);
+			const context: import("./providers/types").ProjectContext = {
+				name: task.project,
+				path: projectEntry?.path ?? "",
+				repo: projectConfig.repo,
+				branch: projectConfig.branch,
+				agent: projectConfig.agent,
+				linearTeamId: projectConfig.linearTeamId,
+			};
+
+			for (const provider of providers) {
+				try {
+					await provider.onComplete(context, task.payload.taskId, {
+						taskId: task.payload.taskId,
+						status: "completed",
+						duration: meta.duration,
+						estimatedCost: 0,
+					});
+				} catch (err) {
+					logger.warn({ err, provider: provider.name, taskId: task.id }, "Provider onComplete failed");
+				}
+			}
 		}
 	});
 	runner.on("taskFailed", (task: Task) => {
@@ -63,7 +114,7 @@ async function main(): Promise<void> {
 	// State file update loop
 	const stateInterval = setInterval(() => {
 		updateState(runner, queue);
-	}, 3000);
+	}, STATE_UPDATE_INTERVAL_MS);
 
 	// HTTP status endpoint
 	const server = createServer((req, res) => {
@@ -142,7 +193,7 @@ async function main(): Promise<void> {
 		clearInterval(stateInterval);
 
 		// Wait for active tasks (max 5 min)
-		await runner.waitForAll(300_000);
+		await runner.waitForAll(SHUTDOWN_TIMEOUT_MS);
 
 		server.close();
 		updateState(runner, queue);
@@ -169,7 +220,7 @@ function updateState(runner: TaskRunner, queue: TaskQueue): void {
 	};
 
 	try {
-		writeFileSync(stateFilePath(), JSON.stringify(state, null, 2));
+		atomicWriteFile(stateFilePath(), JSON.stringify(state, null, 2));
 	} catch {
 		// Ignore write errors
 	}

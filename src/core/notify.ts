@@ -2,6 +2,8 @@ import { execFile } from "node:child_process";
 import { platform } from "node:os";
 import type { GlobalConfig, ProjectConfig, Notifications } from "../config/schema";
 import { logger } from "../utils/logger";
+import { formatDuration } from "../utils/format";
+import { fetchWithRetry } from "../utils/http";
 
 export type EventType = "taskCompleted" | "taskFailed" | "prCreated";
 
@@ -14,12 +16,6 @@ export interface TaskEvent {
 	duration?: number;
 	estimatedCost?: number;
 	error?: string;
-}
-
-function formatDuration(seconds: number): string {
-	const m = Math.floor(seconds / 60);
-	const s = seconds % 60;
-	return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
 function formatSlackMessage(event: TaskEvent): string {
@@ -104,7 +100,7 @@ async function sendSlackBotMessage(
 	text: string,
 	botToken: string,
 ): Promise<void> {
-	const res = await fetch("https://slack.com/api/chat.postMessage", {
+	const res = await fetchWithRetry("https://slack.com/api/chat.postMessage", {
 		method: "POST",
 		headers: {
 			Authorization: `Bearer ${botToken}`,
@@ -112,10 +108,6 @@ async function sendSlackBotMessage(
 		},
 		body: JSON.stringify({ channel, text }),
 	});
-
-	if (!res.ok) {
-		throw new Error(`Slack API error (${res.status})`);
-	}
 
 	const data = (await res.json()) as { ok: boolean; error?: string };
 	if (!data.ok) {
@@ -165,7 +157,7 @@ export async function notify(
 		} else {
 			// Fall back to global webhook
 			promises.push(
-				fetch(notifications.slack.webhook, {
+				fetchWithRetry(notifications.slack.webhook, {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({ text: formatSlackMessage(event) }),
@@ -182,7 +174,7 @@ export async function notify(
 
 	if (notifications.discord?.on[event.type]) {
 		promises.push(
-			fetch(notifications.discord.webhook, {
+			fetchWithRetry(notifications.discord.webhook, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ content: formatDiscordMessage(event) }),

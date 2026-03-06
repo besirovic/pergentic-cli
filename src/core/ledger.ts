@@ -1,7 +1,8 @@
-import { appendFileSync, readFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dispatchedLedgerPath } from "../config/paths";
 import { ensureGlobalConfigDir } from "../config/loader";
 import { logger } from "../utils/logger";
+import { safeAppendFile } from "../utils/fs";
 
 interface LedgerEntry {
   id: string;
@@ -54,7 +55,7 @@ export class DispatchLedger {
     };
 
     try {
-      appendFileSync(this.filePath, JSON.stringify(entry) + "\n");
+      safeAppendFile(this.filePath, JSON.stringify(entry) + "\n");
     } catch (err) {
       logger.error({ err, id }, "Failed to persist dispatch ledger entry");
     }
@@ -62,5 +63,32 @@ export class DispatchLedger {
 
   isDispatched(id: string): boolean {
     return this.dispatched.has(id);
+  }
+
+  prune(maxAgeDays: number = 30): void {
+    if (!existsSync(this.filePath)) return;
+
+    const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+    const content = readFileSync(this.filePath, "utf-8");
+    const retained: string[] = [];
+    const retainedIds = new Set<string>();
+
+    for (const line of content.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const entry = JSON.parse(trimmed) as LedgerEntry;
+        if (new Date(entry.timestamp).getTime() >= cutoff) {
+          retained.push(trimmed);
+          retainedIds.add(entry.id);
+        }
+      } catch {
+        // Skip malformed lines
+      }
+    }
+
+    this.dispatched = retainedIds;
+    writeFileSync(this.filePath, retained.join("\n") + (retained.length ? "\n" : ""));
+    logger.info({ retained: retained.length, maxAgeDays }, "Pruned dispatch ledger");
   }
 }

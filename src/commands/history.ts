@@ -1,10 +1,5 @@
 import { getTaskHistory, type TaskCostEntry } from "../core/cost";
-
-function formatDuration(seconds: number): string {
-	const m = Math.floor(seconds / 60);
-	const s = seconds % 60;
-	return m > 0 ? `${m}m ${s}s` : `${s}s`;
-}
+import { formatDuration } from "../utils/format";
 
 function statusIcon(status?: string): string {
 	return status === "failed" ? "✗" : "✓";

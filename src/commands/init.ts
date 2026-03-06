@@ -137,14 +137,7 @@ function formatChoice(cat: ToolCategory, config: ProjectConfig): string {
 	return `${label} ${status}${detail}`;
 }
 
-const promptTheme = {
-	prefix: { idle: chalk.cyan("?"), done: chalk.green("✓") },
-	icon: { cursor: chalk.cyan("›") },
-	style: {
-		highlight: (text: string) => chalk.cyan.bold(text),
-		message: (text: string) => chalk.bold(text),
-	},
-};
+import { promptTheme, isExitPromptError } from "../utils/prompt-helpers";
 
 function detectGitRemote(projectPath: string): string | undefined {
 	try {
@@ -912,15 +905,7 @@ export async function init(projectPath?: string): Promise<void> {
 	console.log();
 }
 
-function isExitPromptError(err: unknown): boolean {
-	return (
-		err instanceof Error &&
-		(err.name === "ExitPromptError" ||
-			err.constructor.name === "ExitPromptError")
-	);
-}
-
-// --- Integration sub-flows (unchanged) ---
+// --- Integration sub-flows ---
 
 async function configureGitHub(config: ProjectConfig): Promise<void> {
 	config.githubToken = await input({

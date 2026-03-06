@@ -15,6 +15,9 @@ import { AgentName } from "../config/schema";
 import type { GlobalConfig, ProjectConfig } from "../config/schema";
 import simpleGit from "simple-git";
 
+const MAX_ERROR_SNIPPET_CHARS = 2000;
+const MAX_ERROR_DETAIL_CHARS = 500;
+
 export interface RunnerConfig {
   maxConcurrent: number;
   globalConfig: GlobalConfig;
@@ -206,7 +209,13 @@ export class TaskRunner extends EventEmitter {
     const { payload } = task;
 
     // Spawn initial agent
-    const result = await spawnAgentAndWait(agentCmd, worktree.path, agentEnv);
+    const timeoutMs = projectConfig.claude?.agentTimeout
+      ? projectConfig.claude.agentTimeout * 1000
+      : undefined;
+    const handle = spawnAgentAndWait(agentCmd, worktree.path, agentEnv, timeoutMs);
+    const activeEntry = this.active.get(task.id);
+    if (activeEntry) activeEntry.process = handle.process;
+    const result = await handle.result;
     this.active.delete(task.id);
     const duration = Math.floor((Date.now() - startTime) / 1000);
 
@@ -221,10 +230,9 @@ export class TaskRunner extends EventEmitter {
 
           if (commands.length > 0) {
             const maxRetries = verifyConfig?.maxRetries ?? 3;
-            let retriesUsed = 0;
             let verified = false;
 
-            while (retriesUsed <= maxRetries) {
+            for (let attempt = 0; attempt <= maxRetries; attempt++) {
               const verifyResult = await runVerificationCommands(
                 worktree.path, commands, agentEnv,
               );
@@ -234,11 +242,11 @@ export class TaskRunner extends EventEmitter {
                 break;
               }
 
-              if (retriesUsed >= maxRetries) {
+              if (attempt === maxRetries) {
                 logger.error({
                   taskId: task.id,
                   failedCommand: verifyResult.failedCommand,
-                  retries: retriesUsed,
+                  retries: attempt,
                 }, "Verification failed after max retries");
 
                 const event: TaskEvent = {
@@ -246,7 +254,7 @@ export class TaskRunner extends EventEmitter {
                   taskId: payload.taskId,
                   title: payload.title,
                   project: projectName,
-                  error: `Verification command "${verifyResult.failedCommand}" failed after ${retriesUsed} retries.\n\nOutput:\n${verifyResult.output?.slice(-1000)}`,
+                  error: `Verification command "${verifyResult.failedCommand}" failed after ${attempt} retries.\n\nOutput:\n${verifyResult.output?.slice(-1000)}`,
                   duration,
                 };
                 await notify(event, this.globalConfig, projectConfig);
@@ -256,7 +264,7 @@ export class TaskRunner extends EventEmitter {
                   projectConfig,
                   failedCommand: verifyResult.failedCommand!,
                   output: verifyResult.output ?? "",
-                  retries: retriesUsed,
+                  retries: attempt,
                 });
 
                 recordTaskCost(payload.taskId, 0, duration, false, true, {
@@ -280,10 +288,9 @@ export class TaskRunner extends EventEmitter {
               }
 
               // Re-invoke the agent with the error
-              retriesUsed++;
               logger.info({
                 taskId: task.id,
-                retry: retriesUsed,
+                retry: attempt + 1,
                 maxRetries,
                 failedCommand: verifyResult.failedCommand,
               }, "Re-invoking agent to fix verification failure");
@@ -291,18 +298,21 @@ export class TaskRunner extends EventEmitter {
               const fixPrompt = buildVerificationFixPrompt(
                 verifyResult.failedCommand!,
                 verifyResult.output ?? "",
-                retriesUsed,
+                attempt + 1,
                 maxRetries,
               );
 
               const fixCmd = agent.buildCommand(fixPrompt, worktree.path, agentOptions);
-              const fixResult = await spawnAgentAndWait(fixCmd, worktree.path, agentEnv);
+              const fixHandle = spawnAgentAndWait(fixCmd, worktree.path, agentEnv);
+              const fixActiveEntry = this.active.get(task.id);
+              if (fixActiveEntry) fixActiveEntry.process = fixHandle.process;
+              const fixResult = await fixHandle.result;
 
               if (fixResult.exitCode !== 0) {
                 logger.warn({
                   taskId: task.id,
                   exitCode: fixResult.exitCode,
-                  retry: retriesUsed,
+                  retry: attempt + 1,
                 }, "Fix agent exited with non-zero code");
               }
             }
@@ -388,7 +398,7 @@ export class TaskRunner extends EventEmitter {
           });
         }
 
-        this.emit("taskCompleted", task);
+        this.emit("taskCompleted", task, { duration, projectConfig });
         logger.info(
           { taskId: task.id, duration },
           "Task completed successfully",
@@ -396,7 +406,7 @@ export class TaskRunner extends EventEmitter {
       } catch (err) {
         this.emit("taskFailed", task, err);
         logger.error(
-          { taskId: task.id, err, stderr: result.stderr.slice(-2000), stdout: result.stdout.slice(-2000) },
+          { taskId: task.id, err, stderr: result.stderr.slice(-MAX_ERROR_SNIPPET_CHARS), stdout: result.stdout.slice(-MAX_ERROR_SNIPPET_CHARS) },
           "Post-agent steps failed",
         );
         recordTaskCost(payload.taskId, 0, duration, false, true, {
@@ -426,14 +436,14 @@ export class TaskRunner extends EventEmitter {
         await notify(event, this.globalConfig, projectConfig);
       }
     } else {
-      const lastStderrSnippet = result.stderr.slice(-2000);
-      const lastStdoutSnippet = result.stdout.slice(-2000);
+      const lastStderrSnippet = result.stderr.slice(-MAX_ERROR_SNIPPET_CHARS);
+      const lastStdoutSnippet = result.stdout.slice(-MAX_ERROR_SNIPPET_CHARS);
       const errorDetail = lastStderrSnippet || lastStdoutSnippet || "No output captured";
 
       recordTaskCost(payload.taskId, 0, duration, false, true, {
         project: projectName,
         title: payload.title,
-        error: `Agent exited with code ${result.exitCode}: ${errorDetail.slice(0, 500)}`,
+        error: `Agent exited with code ${result.exitCode}: ${errorDetail.slice(0, MAX_ERROR_DETAIL_CHARS)}`,
       });
 
       recordEvent({
@@ -443,11 +453,11 @@ export class TaskRunner extends EventEmitter {
         project: projectName,
         title: payload.title,
         duration,
-        error: `Agent exited with code ${result.exitCode}: ${errorDetail.slice(0, 500)}`,
+        error: `Agent exited with code ${result.exitCode}: ${errorDetail.slice(0, MAX_ERROR_DETAIL_CHARS)}`,
       });
 
       const errorJson = JSON.stringify(
-        { exitCode: result.exitCode, detail: errorDetail.slice(0, 500) },
+        { exitCode: result.exitCode, detail: errorDetail.slice(0, MAX_ERROR_DETAIL_CHARS) },
         null,
         2,
       );

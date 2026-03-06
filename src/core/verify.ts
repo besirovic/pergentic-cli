@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import { logger } from "../utils/logger";
+import { buildSafeEnv } from "../utils/process";
 import type { AgentCommand } from "../agents/types";
+import type { SpawnResult } from "../utils/process";
 
 export interface VerificationResult {
   success: boolean;
@@ -21,7 +23,7 @@ export function execCommand(
   return new Promise((resolve) => {
     const child = spawn("sh", ["-c", cmd], {
       cwd,
-      env: { ...process.env, ...env },
+      env: buildSafeEnv(env),
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -84,62 +86,98 @@ export function buildVerificationFixPrompt(
     "",
     "**Error output:**",
     "```",
-    output.slice(-3000),
+    output.length > 3000 ? `[Output truncated to last 3000 chars]\n${output.slice(-3000)}` : output,
     "```",
     "",
     "Fix the code so this command passes. Do not modify the verification command itself.",
   ].join("\n");
 }
 
-export interface SpawnResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
+import type { ChildProcess } from "node:child_process";
+
+export interface AgentHandle {
+  process: ChildProcess;
+  result: Promise<SpawnResult>;
 }
+
+const SIGKILL_DELAY_MS = 10_000;
 
 export function spawnAgentAndWait(
   agentCmd: AgentCommand,
   cwd: string,
   env: Record<string, string | undefined>,
-): Promise<SpawnResult> {
-  return new Promise((resolve) => {
-    const child = spawn(agentCmd.command, agentCmd.args, {
-      cwd,
-      env: { ...process.env, ...env },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+  timeoutMs?: number,
+): AgentHandle {
+  const child = spawn(agentCmd.command, agentCmd.args, {
+    cwd,
+    env: buildSafeEnv(env),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
 
-    const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
-    const MAX_OUTPUT = 8192;
-    let stdoutLen = 0;
-    let stderrLen = 0;
+  const MAX_OUTPUT = 8192;
+  const stdoutChunks: Buffer[] = [];
+  const stderrChunks: Buffer[] = [];
+  let stdoutLen = 0;
+  let stderrLen = 0;
+  let stdoutTruncated = false;
+  let stderrTruncated = false;
+  let timedOut = false;
 
-    child.stdout?.on("data", (chunk: Buffer) => {
-      stdoutChunks.push(chunk);
-      stdoutLen += chunk.length;
-      while (stdoutLen > MAX_OUTPUT && stdoutChunks.length > 1) {
-        stdoutLen -= stdoutChunks.shift()!.length;
-      }
-    });
+  child.stdout?.on("data", (chunk: Buffer) => {
+    stdoutChunks.push(chunk);
+    stdoutLen += chunk.length;
+    while (stdoutLen > MAX_OUTPUT && stdoutChunks.length > 1) {
+      stdoutLen -= stdoutChunks.shift()!.length;
+      stdoutTruncated = true;
+    }
+  });
 
-    child.stderr?.on("data", (chunk: Buffer) => {
-      stderrChunks.push(chunk);
-      stderrLen += chunk.length;
-      while (stderrLen > MAX_OUTPUT && stderrChunks.length > 1) {
-        stderrLen -= stderrChunks.shift()!.length;
-      }
-    });
+  child.stderr?.on("data", (chunk: Buffer) => {
+    stderrChunks.push(chunk);
+    stderrLen += chunk.length;
+    while (stderrLen > MAX_OUTPUT && stderrChunks.length > 1) {
+      stderrLen -= stderrChunks.shift()!.length;
+      stderrTruncated = true;
+    }
+  });
 
+  let termTimer: ReturnType<typeof setTimeout> | undefined;
+  let killTimer: ReturnType<typeof setTimeout> | undefined;
+
+  if (timeoutMs) {
+    termTimer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+      killTimer = setTimeout(() => {
+        child.kill("SIGKILL");
+      }, SIGKILL_DELAY_MS);
+    }, timeoutMs);
+  }
+
+  const result = new Promise<SpawnResult>((resolve) => {
     child.on("close", (code) => {
-      resolve({
-        exitCode: code ?? 1,
-        stdout: Buffer.concat(stdoutChunks).toString("utf-8").trim(),
-        stderr: Buffer.concat(stderrChunks).toString("utf-8").trim(),
-      });
+      if (termTimer) clearTimeout(termTimer);
+      if (killTimer) clearTimeout(killTimer);
+      const stdout = Buffer.concat(stdoutChunks).toString("utf-8").trim();
+      const stderr = Buffer.concat(stderrChunks).toString("utf-8").trim();
+      if (timedOut) {
+        resolve({
+          exitCode: 1,
+          stdout,
+          stderr: `Agent timed out after ${Math.floor((timeoutMs ?? 0) / 1000)}s\n${stderr}`,
+        });
+      } else {
+        resolve({
+          exitCode: code ?? 1,
+          stdout: stdoutTruncated ? `[Output truncated to last 8KB]\n${stdout}` : stdout,
+          stderr: stderrTruncated ? `[Output truncated to last 8KB]\n${stderr}` : stderr,
+        });
+      }
     });
 
     child.on("error", (err) => {
+      if (termTimer) clearTimeout(termTimer);
+      if (killTimer) clearTimeout(killTimer);
       resolve({
         exitCode: 1,
         stdout: "",
@@ -147,4 +185,6 @@ export function spawnAgentAndWait(
       });
     });
   });
+
+  return { process: child, result };
 }

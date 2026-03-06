@@ -11,6 +11,7 @@ export class Scheduler {
 	private queue: TaskQueue;
 	private runner: TaskRunner;
 	private active = new Set<string>();
+	private checking = false;
 
 	constructor(queue: TaskQueue, runner: TaskRunner) {
 		this.queue = queue;
@@ -18,28 +19,36 @@ export class Scheduler {
 	}
 
 	async checkDue(): Promise<void> {
-		const registry = loadProjectsRegistry();
-		const now = new Date();
+		if (this.checking) return;
+		this.checking = true;
 
-		for (const entry of registry.projects) {
-			const projectName = basename(entry.path);
+		try {
+			const registry = loadProjectsRegistry();
+			const now = new Date();
 
-			let schedulesConfig;
-			try {
-				schedulesConfig = loadSchedulesConfig(entry.path);
-			} catch (err) {
-				logger.warn({ project: projectName, err }, "Failed to load schedules config");
-				continue;
-			}
+			for (const entry of registry.projects) {
+				const projectName = basename(entry.path);
 
-			for (const schedule of schedulesConfig.schedules) {
-				if (!schedule.enabled) continue;
-				if (this.active.has(schedule.id)) continue;
+				let schedulesConfig;
+				try {
+					schedulesConfig = loadSchedulesConfig(entry.path);
+				} catch (err) {
+					logger.warn({ project: projectName, err }, "Failed to load schedules config");
+					continue;
+				}
 
-				if (this.isDue(schedule, now)) {
-					await this.dispatchSchedule(entry.path, projectName, schedule, now);
+				for (const schedule of schedulesConfig.schedules) {
+					if (!schedule.enabled) continue;
+					if (this.active.has(schedule.id)) continue;
+
+					if (this.isDue(schedule, now)) {
+						this.active.add(schedule.id);
+						await this.dispatchSchedule(entry.path, projectName, schedule, now);
+					}
 				}
 			}
+		} finally {
+			this.checking = false;
 		}
 	}
 
@@ -75,12 +84,14 @@ export class Scheduler {
 		if (schedule.type === "prompt") {
 			if (!schedule.prompt) {
 				logger.warn({ scheduleId: schedule.id }, "Schedule has no prompt path configured");
+				this.active.delete(schedule.id);
 				return;
 			}
 
 			const content = readPromptFile(projectPath, schedule.prompt);
 			if (!content || content.trim() === "" || content.trim() === PROMPT_TEMPLATE(schedule.name).trim()) {
 				logger.warn({ scheduleId: schedule.id, promptPath: schedule.prompt }, "Prompt file is empty or still contains template placeholder");
+				this.active.delete(schedule.id);
 				return;
 			}
 
@@ -104,13 +115,15 @@ export class Scheduler {
 			};
 
 			if (this.queue.add(task)) {
-				this.active.add(schedule.id);
 				updateLastRun(projectPath, schedule.id, timestamp);
 				logger.info({ scheduleId: schedule.id, taskId, project: projectName }, "Queued scheduled prompt task");
+			} else {
+				this.active.delete(schedule.id);
 			}
 		} else if (schedule.type === "command") {
 			if (!schedule.command) {
 				logger.warn({ scheduleId: schedule.id }, "Schedule has no command configured");
+				this.active.delete(schedule.id);
 				return;
 			}
 
@@ -134,9 +147,10 @@ export class Scheduler {
 			};
 
 			if (this.queue.add(task)) {
-				this.active.add(schedule.id);
 				updateLastRun(projectPath, schedule.id, timestamp);
 				logger.info({ scheduleId: schedule.id, taskId, project: projectName }, "Queued scheduled command task");
+			} else {
+				this.active.delete(schedule.id);
 			}
 		}
 	}

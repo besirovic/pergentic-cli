@@ -13,23 +13,7 @@ import {
 } from "../config/schedules";
 import { loadProjectConfig } from "../config/loader";
 import type { ScheduleEntry } from "../config/schema";
-
-const promptTheme = {
-	prefix: { idle: chalk.cyan("?"), done: chalk.green("✓") },
-	icon: { cursor: chalk.cyan("›") },
-	style: {
-		answer: (text: string) => chalk.cyan(text),
-		highlight: (text: string) => chalk.cyan(text),
-	},
-};
-
-function isExitPromptError(err: unknown): boolean {
-	return (
-		err instanceof Error &&
-		(err.name === "ExitPromptError" ||
-			err.constructor.name === "ExitPromptError")
-	);
-}
+import { promptTheme, isExitPromptError } from "../utils/prompt-helpers";
 
 const CRON_PRESETS = [
 	{ name: "Every 15 minutes", value: "*/15 * * * *" },

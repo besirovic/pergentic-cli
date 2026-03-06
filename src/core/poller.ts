@@ -5,7 +5,7 @@ import { GitHubProvider } from "../providers/github";
 import { TaskQueue, type Task } from "./queue";
 import { TaskRunner } from "./runner";
 import { DispatchLedger } from "./ledger";
-import { resolveTargetAgents, resolveTargetAgentsWithModels } from "./resolve-target-agents";
+import { resolveTargetAgentsWithModels } from "./resolve-target-agents";
 import { validateLabels } from "./validate-labels";
 import { loadProjectConfig, loadProjectsRegistry } from "../config/loader";
 import { logger } from "../utils/logger";

@@ -1,27 +1,6 @@
 import { resolve, basename } from "node:path";
-import { existsSync, readFileSync } from "node:fs";
 import { loadProjectsRegistry } from "../config/loader";
-import { stateFilePath } from "../config/paths";
-
-interface DaemonState {
-	status: string;
-	projects?: Array<{
-		name: string;
-		agent: string;
-		status: string;
-		lastActivity?: string;
-	}>;
-}
-
-function readState(): DaemonState | null {
-	const path = stateFilePath();
-	if (!existsSync(path)) return null;
-	try {
-		return JSON.parse(readFileSync(path, "utf-8")) as DaemonState;
-	} catch {
-		return null;
-	}
-}
+import { readState } from "../utils/daemon-state";
 
 export async function list(): Promise<void> {
 	const registry = loadProjectsRegistry();

@@ -1,15 +1,21 @@
 import simpleGit from "simple-git";
-import { existsSync, mkdirSync, readdirSync, statSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { createHash } from "node:crypto";
 import { worktreesDir, repoDir } from "../config/paths";
 import { logger } from "../utils/logger";
 
-function slugify(text: string): string {
-  return text
+export function slugify(text: string): string {
+  const slug = text
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 50);
+    .replace(/^-|-$/g, "");
+
+  if (slug.length <= 50) return slug;
+
+  // Add hash suffix to prevent collisions when truncating
+  const hash = createHash("md5").update(text).digest("hex").slice(0, 7);
+  return `${slug.slice(0, 42)}-${hash}`;
 }
 
 export async function ensureRepoClone(
@@ -74,37 +80,6 @@ export async function createWorktree(
   return { path: worktreePath, branch: branchName, taskId };
 }
 
-export async function listWorktrees(
-  projectName: string,
-): Promise<WorktreeInfo[]> {
-  const repo = repoDir(projectName);
-  if (!existsSync(repo)) return [];
-
-  const git = simpleGit(repo);
-  const result = await git.raw(["worktree", "list", "--porcelain"]);
-
-  const worktrees: WorktreeInfo[] = [];
-  const blocks = result.split("\n\n").filter(Boolean);
-
-  for (const block of blocks) {
-    const lines = block.split("\n");
-    const pathLine = lines.find((l) => l.startsWith("worktree "));
-    const branchLine = lines.find((l) => l.startsWith("branch "));
-
-    if (pathLine && branchLine) {
-      const path = pathLine.replace("worktree ", "");
-      const branch = branchLine.replace("branch refs/heads/", "");
-      // Extract taskId from path (last segment)
-      const taskId = path.split("/").pop() ?? "";
-      if (taskId && path !== repo) {
-        worktrees.push({ path, branch, taskId });
-      }
-    }
-  }
-
-  return worktrees;
-}
-
 export async function removeWorktree(
   projectName: string,
   worktreePath: string,
@@ -124,29 +99,3 @@ export async function removeWorktree(
   }
 }
 
-export async function cleanupStaleWorktrees(
-  projectName: string,
-  maxAgeDays: number = 7,
-): Promise<string[]> {
-  const dir = worktreesDir(projectName);
-  if (!existsSync(dir)) return [];
-
-  const now = Date.now();
-  const maxAge = maxAgeDays * 24 * 60 * 60 * 1000;
-  const cleaned: string[] = [];
-
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry);
-    try {
-      const stat = statSync(full);
-      if (now - stat.mtimeMs > maxAge) {
-        await removeWorktree(projectName, full);
-        cleaned.push(entry);
-      }
-    } catch {
-      // Skip entries we can't stat
-    }
-  }
-
-  return cleaned;
-}

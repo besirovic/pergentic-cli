@@ -1,6 +1,7 @@
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { statsFilePath } from "../config/paths";
 import { ensureGlobalConfigDir } from "../config/loader";
+import { atomicWriteFile } from "../utils/fs";
 
 export interface TaskCostEntry {
   taskId: string;
@@ -37,7 +38,7 @@ function loadStats(): StatsFile {
 
 function saveStats(stats: StatsFile): void {
   ensureGlobalConfigDir();
-  writeFileSync(statsFilePath(), JSON.stringify(stats, null, 2));
+  atomicWriteFile(statsFilePath(), JSON.stringify(stats, null, 2));
 }
 
 function todayKey(): string {
@@ -86,20 +87,25 @@ export function recordTaskCost(
   saveStats(stats);
 }
 
-export function getDailyStats(): DailyStats {
-  const stats = loadStats();
-  const date = todayKey();
-  return ensureDay(stats, date);
-}
-
-export function getTaskStats(
-  taskId: string,
-): TaskCostEntry | undefined {
-  const stats = loadStats();
-  return stats.taskHistory.find((t) => t.taskId === taskId);
-}
-
 export function getTaskHistory(): TaskCostEntry[] {
   const stats = loadStats();
   return stats.taskHistory;
+}
+
+export function pruneStats(maxDays: number = 90): void {
+  const stats = loadStats();
+  const cutoff = Date.now() - maxDays * 24 * 60 * 60 * 1000;
+
+  stats.taskHistory = stats.taskHistory.filter(
+    (entry) => new Date(entry.timestamp).getTime() >= cutoff,
+  );
+
+  const cutoffDate = new Date(cutoff).toISOString().slice(0, 10);
+  for (const key of Object.keys(stats.dailyStats)) {
+    if (key < cutoffDate) {
+      delete stats.dailyStats[key];
+    }
+  }
+
+  saveStats(stats);
 }

@@ -54,6 +54,7 @@ const ClaudeOptionsSchema = z.object({
 	maxCostPerTask: z.number().optional(),
 	allowedTools: z.array(z.string()).optional(),
 	systemContext: z.string().optional(),
+	agentTimeout: z.number().min(60).default(3600).optional(),
 });
 
 const PRConfigSchema = z.object({

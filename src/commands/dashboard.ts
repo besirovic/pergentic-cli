@@ -1,18 +1,16 @@
 // TUI Dashboard - placeholder for Ink React implementation (task 8.3)
-import { existsSync, readFileSync } from "node:fs";
-import { stateFilePath } from "../config/paths";
+import { readState } from "../utils/daemon-state";
 
 export async function dashboard(): Promise<void> {
 	// For now, simple polling display. Full Ink TUI in task 8.3.
 	const render = () => {
-		const path = stateFilePath();
-		if (!existsSync(path)) {
+		const state = readState();
+		if (!state) {
 			console.log("No state file. Is the daemon running?");
 			return false;
 		}
 
 		try {
-			const state = JSON.parse(readFileSync(path, "utf-8"));
 			console.clear();
 			console.log("┌─ Pergentic ────────────────────────────────────┐");
 			console.log(

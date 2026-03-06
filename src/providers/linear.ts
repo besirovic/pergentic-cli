@@ -1,5 +1,6 @@
 import type { TaskProvider, IncomingTask, TaskResult, ProjectContext } from "./types";
 import { logger } from "../utils/logger";
+import { fetchWithRetry } from "../utils/http";
 
 const LINEAR_API = "https://api.linear.app/graphql";
 
@@ -25,9 +26,9 @@ export class LinearProvider implements TaskProvider {
     if (!project.linearTeamId) return [];
 
     const query = `
-      query {
+      query($teamId: String!) {
         issues(filter: {
-          team: { key: { eq: "${project.linearTeamId}" } }
+          team: { key: { eq: $teamId } }
           state: { name: { eq: "In Progress" } }
         }, first: 20) {
           nodes {
@@ -44,19 +45,17 @@ export class LinearProvider implements TaskProvider {
     `;
 
     try {
-      const res = await fetch(LINEAR_API, {
+      const res = await fetchWithRetry(LINEAR_API, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: this.apiKey,
         },
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({
+          query,
+          variables: { teamId: project.linearTeamId },
+        }),
       });
-
-      if (!res.ok) {
-        logger.error({ status: res.status }, "Linear API error");
-        return [];
-      }
 
       const data = (await res.json()) as {
         data?: { issues?: { nodes: LinearIssue[] } };
@@ -100,21 +99,24 @@ export class LinearProvider implements TaskProvider {
       result.status === "completed" ? "In Review" : "In Progress";
 
     const mutation = `
-      mutation {
-        issueUpdate(id: "${linearId}", input: { stateId: "${stateName}" }) {
+      mutation($issueId: String!, $stateId: String!) {
+        issueUpdate(id: $issueId, input: { stateId: $stateId }) {
           success
         }
       }
     `;
 
     try {
-      await fetch(LINEAR_API, {
+      await fetchWithRetry(LINEAR_API, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: this.apiKey,
         },
-        body: JSON.stringify({ query: mutation }),
+        body: JSON.stringify({
+          query: mutation,
+          variables: { issueId: linearId, stateId: stateName },
+        }),
       });
     } catch (err) {
       logger.error({ err, taskId }, "Failed to update Linear status");

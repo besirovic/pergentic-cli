@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { ProjectConfig } from "../config/schema";
-import { resolveTargetAgents, resolveTargetAgentsWithModels } from "./resolve-target-agents";
+import { resolveTargetAgentsWithModels } from "./resolve-target-agents";
 
 function makeConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
   return {
@@ -11,25 +11,6 @@ function makeConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
     ...overrides,
   } as ProjectConfig;
 }
-
-describe("resolveTargetAgents", () => {
-  it("returns default agent when no labels", () => {
-    const config = makeConfig();
-    expect(resolveTargetAgents([], config)).toEqual(["claude-code"]);
-  });
-
-  it("returns default agent when no agentLabels configured", () => {
-    const config = makeConfig();
-    expect(resolveTargetAgents(["some-label"], config)).toEqual(["claude-code"]);
-  });
-
-  it("matches agent labels case-insensitively", () => {
-    const config = makeConfig({
-      agentLabels: { aider: ["Use-Aider"] },
-    });
-    expect(resolveTargetAgents(["use-aider"], config)).toEqual(["aider"]);
-  });
-});
 
 describe("resolveTargetAgentsWithModels", () => {
   it("returns default agent with no model when no labels", () => {

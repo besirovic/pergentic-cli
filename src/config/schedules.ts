@@ -1,24 +1,12 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
 	SchedulesConfigSchema,
 	type ScheduleEntry,
 	type SchedulesConfig,
 } from "./schema";
 import { schedulesConfigPath, schedulesDir, schedulePromptPath } from "./paths";
-
-function readYaml(filePath: string): unknown {
-	if (!existsSync(filePath)) return {};
-	const raw = readFileSync(filePath, "utf-8");
-	return parseYaml(raw) ?? {};
-}
-
-function writeYaml(filePath: string, data: unknown): void {
-	const dir = dirname(filePath);
-	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-	writeFileSync(filePath, stringifyYaml(data), "utf-8");
-}
+import { readYaml, writeYaml } from "./yaml-io";
 
 export function loadSchedulesConfig(projectPath: string): SchedulesConfig {
 	const raw = readYaml(schedulesConfigPath(projectPath));
