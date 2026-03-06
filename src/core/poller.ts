@@ -2,12 +2,13 @@ import { basename } from "node:path";
 import type { ProjectContext } from "../providers/types";
 import { LinearProvider } from "../providers/linear";
 import { GitHubProvider } from "../providers/github";
-import { TaskQueue, type Task } from "./queue";
+import { TaskQueue, TaskPriority, type Task } from "./queue";
 import { TaskRunner } from "./runner";
 import { DispatchLedger } from "./ledger";
 import { resolveTargetAgentsWithModels } from "./resolve-target-agents";
 import { validateLabels } from "./validate-labels";
-import { loadProjectConfig, loadProjectsRegistry } from "../config/loader";
+import { loadProjectsRegistry } from "../config/loader";
+import { getCachedProjectConfig } from "../config/cache";
 import { logger } from "../utils/logger";
 
 export interface PollerConfig {
@@ -77,7 +78,7 @@ export class Poller {
       const projectName = basename(entry.path);
       let projectConfig;
       try {
-        projectConfig = loadProjectConfig(entry.path);
+        projectConfig = getCachedProjectConfig(entry.path);
       } catch (err) {
         logger.warn(
           { project: projectName, err },
@@ -209,7 +210,7 @@ export class Poller {
       if (!task) break;
 
       try {
-        const projectConfig = loadProjectConfig(
+        const projectConfig = getCachedProjectConfig(
           loadProjectsRegistry().projects.find(
             (p) => basename(p.path) === task.project,
           )?.path ?? "",

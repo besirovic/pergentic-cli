@@ -8,22 +8,16 @@ import {
 } from "../config/loader";
 import { projectConfigPath } from "../config/paths";
 import { ensureRepoClone } from "../core/worktree";
+import { validateProjectPath } from "../utils/project-validation";
 
 export async function add(projectPath: string): Promise<void> {
-	const absPath = resolve(projectPath);
-
-	if (!existsSync(absPath)) {
-		console.error(`Error: Directory does not exist: ${absPath}`);
+	const validated = validateProjectPath(projectPath);
+	if (!validated.ok) {
+		console.error(`Error: ${validated.error}`);
 		process.exitCode = 1;
 		return;
 	}
-
-	// Check if it's a git repo
-	if (!existsSync(resolve(absPath, ".git"))) {
-		console.error(`Error: Not a git repository: ${absPath}`);
-		process.exitCode = 1;
-		return;
-	}
+	const absPath = validated.value;
 
 	ensureGlobalConfigDir();
 	const registry = loadProjectsRegistry();

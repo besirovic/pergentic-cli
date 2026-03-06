@@ -1,29 +1,62 @@
+export const TaskPriority = {
+  FEEDBACK: 1,
+  NEW: 2,
+  RETRY: 3,
+  SCHEDULED: 4,
+} as const;
+
+export type TaskPriority = (typeof TaskPriority)[keyof typeof TaskPriority];
+
 export interface Task {
   id: string;
   project: string;
-  priority: number; // 1=feedback (highest), 2=new task, 3=retry, 4=scheduled
+  priority: TaskPriority;
   type: "new" | "feedback" | "retry" | "scheduled";
   payload: TaskPayload;
   createdAt: number;
 }
 
-export interface TaskPayload {
+interface BasePayload {
   taskId: string;
   title: string;
   description: string;
   source: "linear" | "github" | "slack" | "schedule";
-  branch?: string;
-  scheduleId?: string;
-  scheduledCommand?: string;
-  schedulePrBehavior?: "new" | "update";
-  schedulePrBranch?: string | null;
-  prNumber?: number;
-  comment?: string;
   metadata?: Record<string, unknown>;
   labels?: string[];
   targetAgents?: string[];
   targetModel?: string;
   targetModelLabel?: string;
+}
+
+export interface NewTaskPayload extends BasePayload {
+  branch?: string;
+}
+
+export interface FeedbackPayload extends BasePayload {
+  prNumber?: number;
+  comment?: string;
+}
+
+export interface ScheduledPayload extends BasePayload {
+  scheduleId?: string;
+  scheduledCommand?: string;
+  schedulePrBehavior?: "new" | "update";
+  schedulePrBranch?: string | null;
+  branch?: string;
+}
+
+export interface RetryPayload extends BasePayload {
+  branch?: string;
+}
+
+export type TaskPayload = NewTaskPayload | FeedbackPayload | ScheduledPayload | RetryPayload;
+
+export function isFeedbackPayload(payload: TaskPayload): payload is FeedbackPayload {
+  return "comment" in payload || "prNumber" in payload;
+}
+
+export function isScheduledPayload(payload: TaskPayload): payload is ScheduledPayload {
+  return "scheduleId" in payload || "scheduledCommand" in payload || "schedulePrBehavior" in payload;
 }
 
 export class TaskQueue {

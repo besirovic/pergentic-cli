@@ -1,18 +1,18 @@
-import { createServer } from "node:http";
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createLogger } from "./utils/logger";
 import { stateFilePath, statsFilePath } from "./config/paths";
 import { atomicWriteFile } from "./utils/fs";
 import { basename } from "node:path";
 import { loadGlobalConfig, loadProjectsRegistry, ensureGlobalConfigDir } from "./config/loader";
-import { TaskQueue } from "./core/queue";
+import { TaskQueue, TaskPriority } from "./core/queue";
 import { TaskRunner } from "./core/runner";
 import { Poller } from "./core/poller";
 import { DispatchLedger } from "./core/ledger";
 import { Scheduler } from "./core/scheduler";
 import { acquireLock, releaseLock } from "./utils/health";
-import { pruneStats } from "./core/cost";
-import { pruneEvents } from "./core/events";
+import { pruneStats, STATS_RETENTION_DAYS } from "./core/cost";
+import { pruneEvents, MAX_EVENT_ENTRIES } from "./core/events";
+import { createDaemonServer } from "./utils/daemon-server";
 import type { Task } from "./core/queue";
 
 const logger = createLogger("daemon");
@@ -41,8 +41,8 @@ async function main(): Promise<void> {
 	// Prune old data at startup
 	try {
 		ledger.prune(30);
-		pruneEvents(10000);
-		pruneStats(90);
+		pruneEvents(MAX_EVENT_ENTRIES);
+		pruneStats(STATS_RETENTION_DAYS);
 	} catch (err) {
 		logger.warn({ err }, "Failed to prune old data");
 	}
@@ -64,8 +64,8 @@ async function main(): Promise<void> {
 	poller.setAfterPollHook(() => scheduler.checkDue());
 
 	// Call provider onComplete when tasks complete, and clear scheduler active set
-	runner.on("taskCompleted", async (task: Task, meta?: { duration: number; projectConfig: import("./config/schema").ProjectConfig }) => {
-		if (task.type === "scheduled" && task.payload.scheduleId) {
+	runner.on("taskCompleted", async (task: Task, meta) => {
+		if (task.type === "scheduled" && "scheduleId" in task.payload && task.payload.scheduleId) {
 			scheduler.clearActive(task.payload.scheduleId);
 		}
 
@@ -106,7 +106,7 @@ async function main(): Promise<void> {
 		}
 	});
 	runner.on("taskFailed", (task: Task) => {
-		if (task.type === "scheduled" && task.payload.scheduleId) {
+		if (task.type === "scheduled" && "scheduleId" in task.payload && task.payload.scheduleId) {
 			scheduler.clearActive(task.payload.scheduleId);
 		}
 	});
@@ -116,67 +116,57 @@ async function main(): Promise<void> {
 		updateState(runner, queue);
 	}, STATE_UPDATE_INTERVAL_MS);
 
-	// HTTP status endpoint
-	const server = createServer((req, res) => {
-		if (req.url === "/status") {
-			res.setHeader("Content-Type", "application/json");
-			const statePath = stateFilePath();
-			if (existsSync(statePath)) {
-				res.end(readFileSync(statePath, "utf-8"));
-			} else {
-				res.end(JSON.stringify({ status: "starting" }));
+	// HTTP server with router
+	const { server, get, post } = createDaemonServer();
+
+	get("/status", (res) => {
+		res.setHeader("Content-Type", "application/json");
+		const statePath = stateFilePath();
+		if (existsSync(statePath)) {
+			res.end(readFileSync(statePath, "utf-8"));
+		} else {
+			res.end(JSON.stringify({ status: "starting" }));
+		}
+	});
+
+	post("/retry", (body, res) => {
+		try {
+			const { taskId, project, source } = JSON.parse(body);
+			if (!taskId || !project) {
+				res.writeHead(400).end("Missing required fields: taskId, project");
+				return;
 			}
-			return;
-		}
-
-		if (req.method === "POST" && req.url === "/retry") {
-			let body = "";
-			req.on("data", (chunk) => (body += chunk));
-			req.on("end", () => {
-				try {
-					const { taskId } = JSON.parse(body);
-					// Re-add task to queue with retry priority
-					queue.add({
-						id: `retry-${taskId}-${Date.now()}`,
-						project: "",
-						priority: 3,
-						type: "retry",
-						createdAt: Date.now(),
-						payload: {
-							taskId,
-							title: `Retry: ${taskId}`,
-							description: "",
-							source: "github",
-						},
-					});
-					res.writeHead(200).end("OK");
-				} catch {
-					res.writeHead(400).end("Bad request");
-				}
+			queue.add({
+				id: `retry-${taskId}-${Date.now()}`,
+				project,
+				priority: TaskPriority.RETRY,
+				type: "retry",
+				createdAt: Date.now(),
+				payload: {
+					taskId,
+					title: `Retry: ${taskId}`,
+					description: "",
+					source: source ?? "github",
+				},
 			});
-			return;
+			res.writeHead(200).end("OK");
+		} catch {
+			res.writeHead(400).end("Bad request");
 		}
+	});
 
-		if (req.method === "POST" && req.url === "/cancel") {
-			let body = "";
-			req.on("data", (chunk) => (body += chunk));
-			req.on("end", () => {
-				try {
-					const { taskId } = JSON.parse(body);
-					const cancelled = runner.cancelTask(taskId);
-					if (cancelled) {
-						res.writeHead(200).end("Cancelled");
-					} else {
-						res.writeHead(404).end("Task not found");
-					}
-				} catch {
-					res.writeHead(400).end("Bad request");
-				}
-			});
-			return;
+	post("/cancel", (body, res) => {
+		try {
+			const { taskId } = JSON.parse(body);
+			const cancelled = runner.cancelTask(taskId);
+			if (cancelled) {
+				res.writeHead(200).end("Cancelled");
+			} else {
+				res.writeHead(404).end("Task not found");
+			}
+		} catch {
+			res.writeHead(400).end("Bad request");
 		}
-
-		res.writeHead(404).end();
 	});
 
 	server.listen(config.statusPort, "127.0.0.1", () => {
@@ -192,7 +182,6 @@ async function main(): Promise<void> {
 		poller.stop();
 		clearInterval(stateInterval);
 
-		// Wait for active tasks (max 5 min)
 		await runner.waitForAll(SHUTDOWN_TIMEOUT_MS);
 
 		server.close();

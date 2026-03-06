@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import { Cron } from "croner";
-import { TaskQueue, type Task } from "./queue";
+import { TaskQueue, TaskPriority, type Task } from "./queue";
 import type { TaskRunner } from "./runner";
 import { loadSchedulesConfig, updateLastRun, readPromptFile, PROMPT_TEMPLATE } from "../config/schedules";
 import { loadProjectsRegistry, loadProjectConfig } from "../config/loader";
@@ -98,7 +98,7 @@ export class Scheduler {
 			const task: Task = {
 				id: taskId,
 				project: projectName,
-				priority: 4,
+				priority: TaskPriority.SCHEDULED,
 				type: "scheduled",
 				createdAt: Date.now(),
 				payload: {
@@ -130,7 +130,7 @@ export class Scheduler {
 			const task: Task = {
 				id: taskId,
 				project: projectName,
-				priority: 4,
+				priority: TaskPriority.SCHEDULED,
 				type: "scheduled",
 				createdAt: Date.now(),
 				payload: {

@@ -1,9 +1,11 @@
+import type { TaskPriority } from "../core/queue";
+
 export interface IncomingTask {
   id: string;
   title: string;
   description: string;
   source: "linear" | "github" | "slack";
-  priority: number;
+  priority: TaskPriority;
   type: "new" | "feedback";
   metadata: Record<string, unknown>;
   labels: string[];

@@ -26,7 +26,9 @@ export function recordEvent(event: LifecycleEvent): void {
 	safeAppendFile(eventsFilePath(), JSON.stringify(event) + "\n");
 }
 
-export function pruneEvents(maxEntries: number = 10000): void {
+export const MAX_EVENT_ENTRIES = 10_000;
+
+export function pruneEvents(maxEntries: number = MAX_EVENT_ENTRIES): void {
 	const filePath = eventsFilePath();
 	if (!existsSync(filePath)) return;
 

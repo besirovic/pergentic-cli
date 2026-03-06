@@ -1,0 +1,94 @@
+import { recordTaskCost } from "./cost";
+import { recordEvent, type LifecycleEvent } from "./events";
+import { notify, type TaskEvent } from "./notify";
+import type { GlobalConfig, ProjectConfig } from "../config/schema";
+
+export interface TaskContext {
+  taskId: string;
+  title: string;
+  project: string;
+}
+
+export class TaskLifecycle {
+  private globalConfig: GlobalConfig;
+
+  constructor(globalConfig: GlobalConfig) {
+    this.globalConfig = globalConfig;
+  }
+
+  recordStart(ctx: TaskContext): void {
+    recordEvent({
+      timestamp: new Date().toISOString(),
+      type: "taskStarted",
+      taskId: ctx.taskId,
+      project: ctx.project,
+      title: ctx.title,
+    });
+  }
+
+  async recordSuccess(
+    ctx: TaskContext,
+    duration: number,
+    prUrl: string,
+    projectConfig?: ProjectConfig,
+  ): Promise<void> {
+    recordTaskCost(ctx.taskId, 0, duration, true, false, {
+      project: ctx.project,
+      title: ctx.title,
+      prUrl,
+    });
+
+    recordEvent({
+      timestamp: new Date().toISOString(),
+      type: "prCreated",
+      taskId: ctx.taskId,
+      project: ctx.project,
+      title: ctx.title,
+      duration,
+      prUrl,
+    });
+
+    const event: TaskEvent = {
+      type: "prCreated",
+      taskId: ctx.taskId,
+      title: ctx.title,
+      project: ctx.project,
+      prUrl,
+      duration,
+    };
+    await notify(event, this.globalConfig, projectConfig);
+  }
+
+  async recordFailure(
+    ctx: TaskContext,
+    duration: number,
+    error: string,
+    projectConfig?: ProjectConfig,
+  ): Promise<void> {
+    recordTaskCost(ctx.taskId, 0, duration, false, true, {
+      project: ctx.project,
+      title: ctx.title,
+      error,
+    });
+
+    recordEvent({
+      timestamp: new Date().toISOString(),
+      type: "taskFailed",
+      taskId: ctx.taskId,
+      project: ctx.project,
+      title: ctx.title,
+      duration,
+      error,
+    });
+
+    const event: TaskEvent = {
+      type: "taskFailed",
+      taskId: ctx.taskId,
+      title: ctx.title,
+      project: ctx.project,
+      error,
+      duration,
+    };
+    await notify(event, this.globalConfig, projectConfig);
+  }
+}

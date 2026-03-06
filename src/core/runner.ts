@@ -1,15 +1,14 @@
 import { type ChildProcess } from "node:child_process";
-import { EventEmitter } from "node:events";
 import { resolveAgent } from "../agents/resolve-agent";
 import { createWorktree, ensureRepoClone, type WorktreeInfo } from "./worktree";
 import { commitAll, pushBranch, createPR, amendAndForcePush, pullBranch } from "./git";
 import { initHistory, addFeedbackRound, buildFeedbackPrompt, loadHistory } from "./feedback";
-import { notify, type TaskEvent } from "./notify";
 import { postTaskComments, postVerificationFailureComment } from "./comments";
-import { recordTaskCost } from "./cost";
-import { recordEvent } from "./events";
 import { spawnAgentAndWait, runVerificationCommands, buildVerificationFixPrompt, execCommand } from "./verify";
+import { TaskLifecycle, type TaskContext } from "./task-lifecycle";
+import { buildPRDetails } from "./pr-builder";
 import { logger } from "../utils/logger";
+import { TypedEventEmitter } from "../types/typed-emitter";
 import type { Task } from "./queue";
 import { AgentName } from "../config/schema";
 import type { GlobalConfig, ProjectConfig } from "../config/schema";
@@ -17,6 +16,20 @@ import simpleGit from "simple-git";
 
 const MAX_ERROR_SNIPPET_CHARS = 2000;
 const MAX_ERROR_DETAIL_CHARS = 500;
+
+export interface TaskCompletedMeta {
+  duration: number;
+  projectConfig: ProjectConfig;
+  prUrl?: string;
+  prNumber?: number;
+  worktreePath?: string;
+}
+
+export interface RunnerEvents {
+  taskStarted: (task: Task) => void;
+  taskCompleted: (task: Task, meta?: TaskCompletedMeta) => void;
+  taskFailed: (task: Task, error: unknown) => void;
+}
 
 export interface RunnerConfig {
   maxConcurrent: number;
@@ -30,15 +43,17 @@ interface ActiveTask {
   startTime: number;
 }
 
-export class TaskRunner extends EventEmitter {
+export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
   private active = new Map<string, ActiveTask>();
   private maxConcurrent: number;
   private globalConfig: GlobalConfig;
+  private lifecycle: TaskLifecycle;
 
   constructor(config: RunnerConfig) {
     super();
     this.maxConcurrent = config.maxConcurrent;
     this.globalConfig = config.globalConfig;
+    this.lifecycle = new TaskLifecycle(config.globalConfig);
   }
 
   async run(
@@ -50,6 +65,7 @@ export class TaskRunner extends EventEmitter {
     const projectName = task.project;
     const { payload } = task;
     const startTime = Date.now();
+    const ctx: TaskContext = { taskId: payload.taskId, title: payload.title, project: projectName };
 
     logger.info(
       { taskId: task.id, project: projectName, type: task.type },
@@ -57,12 +73,12 @@ export class TaskRunner extends EventEmitter {
     );
 
     try {
-      // Ensure repo is cloned before creating worktrees
       await ensureRepoClone(projectName, projectConfig.repo, projectConfig.branch);
 
-      // Create or reuse worktree — use stable branch for scheduled update PRs
       const worktreeTaskId = (task.type === "scheduled"
+        && "schedulePrBehavior" in payload
         && payload.schedulePrBehavior === "update"
+        && "schedulePrBranch" in payload
         && payload.schedulePrBranch)
           ? payload.schedulePrBranch
           : payload.taskId;
@@ -78,29 +94,19 @@ export class TaskRunner extends EventEmitter {
       let prompt: string;
 
       if (task.type === "feedback") {
-        // Pull latest changes
         await pullBranch(worktree.path, worktree.branch);
-
-        // Add feedback to history and build prompt
         const history =
           loadHistory(worktree.path) ??
           initHistory(worktree.path, payload.taskId, payload.description);
-        addFeedbackRound(worktree.path, payload.comment ?? "");
-        prompt = buildFeedbackPrompt(
-          history,
-          payload.comment ?? "",
-        );
-      } else if (task.type === "scheduled" && payload.scheduledCommand) {
-        // Command-type scheduled task — run in worktree
+        const comment = "comment" in payload ? payload.comment ?? "" : "";
+        addFeedbackRound(worktree.path, comment);
+        prompt = buildFeedbackPrompt(history, comment);
+      } else if (task.type === "scheduled" && "scheduledCommand" in payload && payload.scheduledCommand) {
         return this.runScheduledCommand(task, projectConfig, projectName, worktree, startTime);
-      } else if (task.type === "scheduled" && !payload.scheduledCommand) {
-        // Prompt-type scheduled task — description IS the full prompt
+      } else if (task.type === "scheduled" && !("scheduledCommand" in payload && payload.scheduledCommand)) {
         prompt = payload.description;
       } else {
-        // Initialize feedback history for new tasks
         initHistory(worktree.path, payload.taskId, payload.description);
-
-        // Build initial prompt
         const contextParts: string[] = [];
         if (projectConfig.claude?.systemContext) {
           contextParts.push(projectConfig.claude.systemContext);
@@ -111,7 +117,7 @@ export class TaskRunner extends EventEmitter {
         prompt = contextParts.join("\n\n");
       }
 
-      // Resolve agent — use label-targeted agent if specified, otherwise default
+      // Resolve agent
       const rawAgentName = payload.targetAgents?.[0] ?? projectConfig.agent;
       const parsedAgent = AgentName.catch("claude-code").parse(rawAgentName);
       const agent = resolveAgent(parsedAgent);
@@ -128,12 +134,7 @@ export class TaskRunner extends EventEmitter {
       const agentCmd = agent.buildCommand(prompt, worktree.path, agentOptions);
 
       logger.info(
-        {
-          taskId: task.id,
-          command: agentCmd.command,
-          args: agentCmd.args,
-          cwd: worktree.path,
-        },
+        { taskId: task.id, command: agentCmd.command, args: agentCmd.args, cwd: worktree.path },
         "Executing agent command",
       );
 
@@ -145,25 +146,12 @@ export class TaskRunner extends EventEmitter {
         ...agentCmd.env,
       };
 
-      const activeTask: ActiveTask = {
-        task,
-        process: null,
-        worktree,
-        startTime,
-      };
+      const activeTask: ActiveTask = { task, process: null, worktree, startTime };
       this.active.set(task.id, activeTask);
 
       this.emit("taskStarted", task);
+      this.lifecycle.recordStart(ctx);
 
-      recordEvent({
-        timestamp: new Date().toISOString(),
-        type: "taskStarted",
-        taskId: payload.taskId,
-        project: projectName,
-        title: payload.title,
-      });
-
-      // Run agent (async, non-blocking for the caller)
       this.executeTask(
         task, projectConfig, projectName, worktree, agentCmd, agentEnv,
         agentOptions, agent, startTime,
@@ -174,17 +162,8 @@ export class TaskRunner extends EventEmitter {
       return true;
     } catch (err) {
       logger.error({ taskId: task.id, err }, "Failed to start task");
-
-      const event: TaskEvent = {
-        type: "taskFailed",
-        taskId: payload.taskId,
-        title: payload.title,
-        project: projectName,
-        error: String(err),
-        duration: Math.floor((Date.now() - startTime) / 1000),
-      };
-      await notify(event, this.globalConfig, projectConfig);
-
+      const duration = Math.floor((Date.now() - startTime) / 1000);
+      await this.lifecycle.recordFailure(ctx, duration, String(err), projectConfig);
       this.emit("taskFailed", task, err);
       return false;
     }
@@ -207,8 +186,8 @@ export class TaskRunner extends EventEmitter {
     startTime: number,
   ): Promise<void> {
     const { payload } = task;
+    const ctx: TaskContext = { taskId: payload.taskId, title: payload.title, project: projectName };
 
-    // Spawn initial agent
     const timeoutMs = projectConfig.claude?.agentTimeout
       ? projectConfig.claude.agentTimeout * 1000
       : undefined;
@@ -229,162 +208,30 @@ export class TaskRunner extends EventEmitter {
           const commands = verifyConfig?.commands ?? [];
 
           if (commands.length > 0) {
-            const maxRetries = verifyConfig?.maxRetries ?? 3;
-            let verified = false;
-
-            for (let attempt = 0; attempt <= maxRetries; attempt++) {
-              const verifyResult = await runVerificationCommands(
-                worktree.path, commands, agentEnv,
-              );
-
-              if (verifyResult.success) {
-                verified = true;
-                break;
-              }
-
-              if (attempt === maxRetries) {
-                logger.error({
-                  taskId: task.id,
-                  failedCommand: verifyResult.failedCommand,
-                  retries: attempt,
-                }, "Verification failed after max retries");
-
-                const event: TaskEvent = {
-                  type: "taskFailed",
-                  taskId: payload.taskId,
-                  title: payload.title,
-                  project: projectName,
-                  error: `Verification command "${verifyResult.failedCommand}" failed after ${attempt} retries.\n\nOutput:\n${verifyResult.output?.slice(-1000)}`,
-                  duration,
-                };
-                await notify(event, this.globalConfig, projectConfig);
-
-                await postVerificationFailureComment({
-                  task,
-                  projectConfig,
-                  failedCommand: verifyResult.failedCommand!,
-                  output: verifyResult.output ?? "",
-                  retries: attempt,
-                });
-
-                recordTaskCost(payload.taskId, 0, duration, false, true, {
-                  project: projectName,
-                  title: payload.title,
-                  error: `Verification failed: ${verifyResult.failedCommand}`,
-                });
-
-                recordEvent({
-                  timestamp: new Date().toISOString(),
-                  type: "taskFailed",
-                  taskId: payload.taskId,
-                  project: projectName,
-                  title: payload.title,
-                  duration,
-                  error: `Verification failed: ${verifyResult.failedCommand}`,
-                });
-
-                this.emit("taskFailed", task, new Error("Verification failed"));
-                return;
-              }
-
-              // Re-invoke the agent with the error
-              logger.info({
-                taskId: task.id,
-                retry: attempt + 1,
-                maxRetries,
-                failedCommand: verifyResult.failedCommand,
-              }, "Re-invoking agent to fix verification failure");
-
-              const fixPrompt = buildVerificationFixPrompt(
-                verifyResult.failedCommand!,
-                verifyResult.output ?? "",
-                attempt + 1,
-                maxRetries,
-              );
-
-              const fixCmd = agent.buildCommand(fixPrompt, worktree.path, agentOptions);
-              const fixHandle = spawnAgentAndWait(fixCmd, worktree.path, agentEnv);
-              const fixActiveEntry = this.active.get(task.id);
-              if (fixActiveEntry) fixActiveEntry.process = fixHandle.process;
-              const fixResult = await fixHandle.result;
-
-              if (fixResult.exitCode !== 0) {
-                logger.warn({
-                  taskId: task.id,
-                  exitCode: fixResult.exitCode,
-                  retry: attempt + 1,
-                }, "Fix agent exited with non-zero code");
-              }
-            }
-
+            const verified = await this.runVerificationLoop(
+              task, projectConfig, projectName, worktree, agentEnv,
+              agentOptions, agent, duration, commands, verifyConfig?.maxRetries ?? 3,
+            );
             if (!verified) return;
           }
 
-          // Proceed with commit → push → PR flow
-          const isScheduled = task.type === "scheduled";
-          const commitMsg = isScheduled
-            ? `chore(schedule): ${payload.title} [${payload.taskId}]`
-            : `feat: ${payload.title} [${payload.taskId}]`;
-          await commitAll(worktree.path, commitMsg);
+          // Commit → push → PR
+          const prDetails = buildPRDetails(task, projectConfig);
+          await commitAll(worktree.path, prDetails.commitMessage);
           await pushBranch(worktree.path, worktree.branch);
-
-          const prConfig = projectConfig.pr;
-          const isLabelTriggered = payload.targetAgents && payload.targetAgents.length > 0;
-          const prAgentName = payload.targetAgents?.[0] ?? projectConfig.agent;
-
-          const modelSuffix = payload.targetModelLabel
-            ? ` [${prAgentName}/${payload.targetModelLabel}]`
-            : (isLabelTriggered ? ` [${prAgentName}]` : "");
-
-          const prTitle = isScheduled
-            ? `chore(schedule): ${payload.title}`
-            : (prConfig?.titleFormat ?? "feat: {taskTitle} [{taskId}]")
-              .replace("{taskTitle}", payload.title)
-              .replace("{taskId}", payload.taskId)
-              + modelSuffix;
-
-          const prBody = isScheduled
-            ? `Automated scheduled task: **${payload.title}**\n\nSchedule: \`${payload.scheduleId}\``
-            : (prConfig?.bodyTemplate ?? "Resolves {taskId}")
-              .replace("{taskTitle}", payload.title)
-              .replace("{taskId}", payload.taskId);
 
           const pr = await createPR(worktree.path, {
             repo: projectConfig.repo,
             branch: worktree.branch,
             baseBranch: projectConfig.branch,
-            title: prTitle,
-            body: prBody,
-            labels: prConfig?.labels,
-            reviewers: prConfig?.reviewers,
+            title: prDetails.title,
+            body: prDetails.body,
+            labels: projectConfig.pr?.labels,
+            reviewers: projectConfig.pr?.reviewers,
             githubToken: projectConfig.githubToken ?? "",
           });
 
-          recordTaskCost(payload.taskId, 0, duration, true, false, {
-            project: projectName,
-            title: payload.title,
-            prUrl: pr.url,
-          });
-
-          recordEvent({
-            timestamp: new Date().toISOString(),
-            type: "prCreated",
-            taskId: payload.taskId,
-            project: projectName,
-            title: payload.title,
-            duration,
-            prUrl: pr.url,
-          });
-
-          const event: TaskEvent = {
-            type: "prCreated",
-            taskId: payload.taskId,
-            title: payload.title,
-            project: projectName,
-            prUrl: pr.url,
-            duration,
-          };
-          await notify(event, this.globalConfig, projectConfig);
+          await this.lifecycle.recordSuccess(ctx, duration, pr.url, projectConfig);
 
           await postTaskComments({
             worktreePath: worktree.path,
@@ -396,87 +243,117 @@ export class TaskRunner extends EventEmitter {
             projectConfig,
             task,
           });
+
+          this.emit("taskCompleted", task, {
+            duration,
+            projectConfig,
+            prUrl: pr.url,
+            prNumber: pr.number,
+            worktreePath: worktree.path,
+          });
+          logger.info({ taskId: task.id, duration }, "Task completed successfully");
+          return;
         }
 
         this.emit("taskCompleted", task, { duration, projectConfig });
-        logger.info(
-          { taskId: task.id, duration },
-          "Task completed successfully",
-        );
+        logger.info({ taskId: task.id, duration }, "Task completed successfully");
       } catch (err) {
         this.emit("taskFailed", task, err);
         logger.error(
           { taskId: task.id, err, stderr: result.stderr.slice(-MAX_ERROR_SNIPPET_CHARS), stdout: result.stdout.slice(-MAX_ERROR_SNIPPET_CHARS) },
           "Post-agent steps failed",
         );
-        recordTaskCost(payload.taskId, 0, duration, false, true, {
-          project: projectName,
-          title: payload.title,
-          error: String(err),
-        });
-
-        recordEvent({
-          timestamp: new Date().toISOString(),
-          type: "taskFailed",
-          taskId: payload.taskId,
-          project: projectName,
-          title: payload.title,
-          duration,
-          error: String(err),
-        });
-
-        const event: TaskEvent = {
-          type: "taskFailed",
-          taskId: payload.taskId,
-          title: payload.title,
-          project: projectName,
-          error: String(err),
-          duration,
-        };
-        await notify(event, this.globalConfig, projectConfig);
+        await this.lifecycle.recordFailure(ctx, duration, String(err), projectConfig);
       }
     } else {
       const lastStderrSnippet = result.stderr.slice(-MAX_ERROR_SNIPPET_CHARS);
       const lastStdoutSnippet = result.stdout.slice(-MAX_ERROR_SNIPPET_CHARS);
       const errorDetail = lastStderrSnippet || lastStdoutSnippet || "No output captured";
+      const errorMsg = `Agent exited with code ${result.exitCode}: ${errorDetail.slice(0, MAX_ERROR_DETAIL_CHARS)}`;
 
-      recordTaskCost(payload.taskId, 0, duration, false, true, {
-        project: projectName,
-        title: payload.title,
-        error: `Agent exited with code ${result.exitCode}: ${errorDetail.slice(0, MAX_ERROR_DETAIL_CHARS)}`,
-      });
-
-      recordEvent({
-        timestamp: new Date().toISOString(),
-        type: "taskFailed",
-        taskId: payload.taskId,
-        project: projectName,
-        title: payload.title,
-        duration,
-        error: `Agent exited with code ${result.exitCode}: ${errorDetail.slice(0, MAX_ERROR_DETAIL_CHARS)}`,
-      });
-
-      const errorJson = JSON.stringify(
-        { exitCode: result.exitCode, detail: errorDetail.slice(0, MAX_ERROR_DETAIL_CHARS) },
-        null,
-        2,
-      );
-
-      const event: TaskEvent = {
-        type: "taskFailed",
-        taskId: payload.taskId,
-        title: payload.title,
-        project: projectName,
-        error: errorJson,
-        duration,
-      };
-      await notify(event, this.globalConfig, projectConfig);
+      await this.lifecycle.recordFailure(ctx, duration, errorMsg, projectConfig);
       this.emit("taskFailed", task, new Error(`Exit code: ${result.exitCode}`));
       logger.error(
         { taskId: task.id, exitCode: result.exitCode, duration, stderr: lastStderrSnippet, stdout: lastStdoutSnippet },
         "Task failed",
       );
     }
+  }
+
+  private async runVerificationLoop(
+    task: Task,
+    projectConfig: ProjectConfig,
+    projectName: string,
+    worktree: WorktreeInfo,
+    agentEnv: Record<string, string | undefined>,
+    agentOptions: {
+      instructions?: string;
+      allowedTools?: string[];
+      maxCostPerTask?: number;
+      model?: string;
+    },
+    agent: ReturnType<typeof resolveAgent>,
+    duration: number,
+    commands: string[],
+    maxRetries: number,
+  ): Promise<boolean> {
+    const { payload } = task;
+    const ctx: TaskContext = { taskId: payload.taskId, title: payload.title, project: projectName };
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const verifyResult = await runVerificationCommands(worktree.path, commands, agentEnv);
+
+      if (verifyResult.success) return true;
+
+      if (attempt === maxRetries) {
+        logger.error(
+          { taskId: task.id, failedCommand: verifyResult.failedCommand, retries: attempt },
+          "Verification failed after max retries",
+        );
+
+        const error = `Verification command "${verifyResult.failedCommand}" failed after ${attempt} retries.\n\nOutput:\n${verifyResult.output?.slice(-1000)}`;
+        await this.lifecycle.recordFailure(ctx, duration, `Verification failed: ${verifyResult.failedCommand}`, projectConfig);
+
+        await postVerificationFailureComment({
+          task,
+          projectConfig,
+          failedCommand: verifyResult.failedCommand!,
+          output: verifyResult.output ?? "",
+          retries: attempt,
+        });
+
+        this.emit("taskFailed", task, new Error("Verification failed"));
+        return false;
+      }
+
+      // Re-invoke agent to fix
+      logger.info(
+        { taskId: task.id, retry: attempt + 1, maxRetries, failedCommand: verifyResult.failedCommand },
+        "Re-invoking agent to fix verification failure",
+      );
+
+      const fixPrompt = buildVerificationFixPrompt(
+        verifyResult.failedCommand!,
+        verifyResult.output ?? "",
+        attempt + 1,
+        maxRetries,
+      );
+
+      const fixCmd = agent.buildCommand(fixPrompt, worktree.path, agentOptions);
+      const fixHandle = spawnAgentAndWait(fixCmd, worktree.path, agentEnv);
+      const fixActiveEntry = this.active.get(task.id);
+      if (fixActiveEntry) fixActiveEntry.process = fixHandle.process;
+      const fixResult = await fixHandle.result;
+
+      if (fixResult.exitCode !== 0) {
+        logger.warn(
+          { taskId: task.id, exitCode: fixResult.exitCode, retry: attempt + 1 },
+          "Fix agent exited with non-zero code",
+        );
+      }
+    }
+
+    return false;
   }
 
   isActive(taskId: string): boolean {
@@ -516,26 +393,15 @@ export class TaskRunner extends EventEmitter {
     startTime: number,
   ): Promise<boolean> {
     const { payload } = task;
-    const command = payload.scheduledCommand!;
+    const command = "scheduledCommand" in payload ? payload.scheduledCommand! : "";
 
-    const activeTask: ActiveTask = {
-      task,
-      process: null,
-      worktree,
-      startTime,
-    };
+    const activeTask: ActiveTask = { task, process: null, worktree, startTime };
     this.active.set(task.id, activeTask);
     this.emit("taskStarted", task);
 
-    recordEvent({
-      timestamp: new Date().toISOString(),
-      type: "taskStarted",
-      taskId: payload.taskId,
-      project: projectName,
-      title: payload.title,
-    });
+    const ctx: TaskContext = { taskId: payload.taskId, title: payload.title, project: projectName };
+    this.lifecycle.recordStart(ctx);
 
-    // Run async to not block
     this.executeScheduledCommand(
       task, projectConfig, projectName, worktree, command, startTime,
     ).catch((err) => {
@@ -554,6 +420,7 @@ export class TaskRunner extends EventEmitter {
     startTime: number,
   ): Promise<void> {
     const { payload } = task;
+    const ctx: TaskContext = { taskId: payload.taskId, title: payload.title, project: projectName };
     const agentEnv: Record<string, string | undefined> = {
       ...(projectConfig.githubToken && { GITHUB_TOKEN: projectConfig.githubToken }),
     };
@@ -564,15 +431,7 @@ export class TaskRunner extends EventEmitter {
       const duration = Math.floor((Date.now() - startTime) / 1000);
 
       if (!result.success) {
-        const event: TaskEvent = {
-          type: "taskFailed",
-          taskId: payload.taskId,
-          title: payload.title,
-          project: projectName,
-          error: `Command failed: ${result.output.slice(-1000)}`,
-          duration,
-        };
-        await notify(event, this.globalConfig, projectConfig);
+        await this.lifecycle.recordFailure(ctx, duration, `Command failed: ${result.output.slice(-1000)}`, projectConfig);
         this.emit("taskFailed", task, new Error("Scheduled command failed"));
         return;
       }
@@ -588,46 +447,22 @@ export class TaskRunner extends EventEmitter {
       }
 
       // Commit, push, create PR
-      const commitMsg = `chore(schedule): ${payload.title} [${payload.taskId}]`;
-      await commitAll(worktree.path, commitMsg);
+      const prDetails = buildPRDetails(task, projectConfig);
+      await commitAll(worktree.path, prDetails.commitMessage);
       await pushBranch(worktree.path, worktree.branch);
 
       const pr = await createPR(worktree.path, {
         repo: projectConfig.repo,
         branch: worktree.branch,
         baseBranch: projectConfig.branch,
-        title: `chore(schedule): ${payload.title}`,
-        body: `Automated scheduled task: **${payload.title}**\n\nSchedule: \`${payload.scheduleId}\``,
+        title: prDetails.title,
+        body: prDetails.body,
         labels: projectConfig.pr?.labels,
         reviewers: projectConfig.pr?.reviewers,
         githubToken: projectConfig.githubToken ?? "",
       });
 
-      recordTaskCost(payload.taskId, 0, duration, true, false, {
-        project: projectName,
-        title: payload.title,
-        prUrl: pr.url,
-      });
-
-      recordEvent({
-        timestamp: new Date().toISOString(),
-        type: "prCreated",
-        taskId: payload.taskId,
-        project: projectName,
-        title: payload.title,
-        duration,
-        prUrl: pr.url,
-      });
-
-      const event: TaskEvent = {
-        type: "prCreated",
-        taskId: payload.taskId,
-        title: payload.title,
-        project: projectName,
-        prUrl: pr.url,
-        duration,
-      };
-      await notify(event, this.globalConfig, projectConfig);
+      await this.lifecycle.recordSuccess(ctx, duration, pr.url, projectConfig);
 
       this.emit("taskCompleted", task);
       logger.info({ taskId: task.id, duration, prUrl: pr.url }, "Scheduled command task completed");
@@ -636,22 +471,7 @@ export class TaskRunner extends EventEmitter {
       const duration = Math.floor((Date.now() - startTime) / 1000);
       this.emit("taskFailed", task, err);
       logger.error({ taskId: task.id, err }, "Scheduled command execution failed");
-
-      recordTaskCost(payload.taskId, 0, duration, false, true, {
-        project: projectName,
-        title: payload.title,
-        error: String(err),
-      });
-
-      const event: TaskEvent = {
-        type: "taskFailed",
-        taskId: payload.taskId,
-        title: payload.title,
-        project: projectName,
-        error: String(err),
-        duration,
-      };
-      await notify(event, this.globalConfig, projectConfig);
+      await this.lifecycle.recordFailure(ctx, duration, String(err), projectConfig);
     }
   }
 
@@ -669,7 +489,6 @@ export class TaskRunner extends EventEmitter {
 
       const timer = setTimeout(() => {
         clearInterval(check);
-        // Force kill remaining
         for (const [id, active] of this.active) {
           active.process?.kill("SIGKILL");
           this.active.delete(id);

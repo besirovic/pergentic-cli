@@ -92,7 +92,9 @@ export function getTaskHistory(): TaskCostEntry[] {
   return stats.taskHistory;
 }
 
-export function pruneStats(maxDays: number = 90): void {
+export const STATS_RETENTION_DAYS = 90;
+
+export function pruneStats(maxDays: number = STATS_RETENTION_DAYS): void {
   const stats = loadStats();
   const cutoff = Date.now() - maxDays * 24 * 60 * 60 * 1000;
 

@@ -51,8 +51,35 @@ function formatSlackMessage(event: TaskEvent): string {
 }
 
 function formatDiscordMessage(event: TaskEvent): string {
-	// Discord uses the same format as Slack for simple text
-	return formatSlackMessage(event);
+	switch (event.type) {
+		case "taskCompleted":
+		case "prCreated":
+			return [
+				`**${event.taskId}:** ${event.title}`,
+				`**Project:** ${event.project}`,
+				event.prUrl
+					? `**PR:** [View Pull Request](${event.prUrl})`
+					: "",
+				event.duration
+					? `**Duration:** ${formatDuration(event.duration)}`
+					: "",
+				event.estimatedCost
+					? `**Cost:** $${event.estimatedCost.toFixed(2)}`
+					: "",
+			]
+				.filter(Boolean)
+				.join("\n");
+
+		case "taskFailed":
+			return [
+				`**${event.taskId}:** ${event.title}`,
+				`**Project:** ${event.project}`,
+				event.error
+					? `**Error:**\n\`\`\`${event.error}\`\`\``
+					: "**Error:** Unknown",
+				`Run \`pergentic retry ${event.taskId}\` to retry`,
+			].join("\n");
+	}
 }
 
 function formatDesktopMessage(event: TaskEvent): { title: string; body: string } {

@@ -1,4 +1,6 @@
-import type { TaskProvider, IncomingTask, TaskResult, ProjectContext } from "./types";
+import type { IncomingTask, TaskResult, ProjectContext } from "./types";
+import { BaseProvider } from "./base";
+import { TaskPriority } from "../core/queue";
 import { logger } from "../utils/logger";
 import { fetchWithRetry } from "../utils/http";
 
@@ -14,15 +16,16 @@ interface LinearIssue {
   labels: { nodes: Array<{ name: string }> };
 }
 
-export class LinearProvider implements TaskProvider {
+export class LinearProvider extends BaseProvider {
   name = "linear";
   private apiKey: string;
 
   constructor(apiKey: string) {
+    super();
     this.apiKey = apiKey;
   }
 
-  async poll(project: ProjectContext): Promise<IncomingTask[]> {
+  async fetchTasks(project: ProjectContext): Promise<IncomingTask[]> {
     if (!project.linearTeamId) return [];
 
     const query = `
@@ -44,47 +47,42 @@ export class LinearProvider implements TaskProvider {
       }
     `;
 
-    try {
-      const res = await fetchWithRetry(LINEAR_API, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: this.apiKey,
+    const res = await fetchWithRetry(LINEAR_API, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: this.apiKey,
+      },
+      body: JSON.stringify({
+        query,
+        variables: { teamId: project.linearTeamId },
+      }),
+    });
+
+    const data = (await res.json()) as {
+      data?: { issues?: { nodes: LinearIssue[] } };
+    };
+    const issues = data.data?.issues?.nodes ?? [];
+    const tasks: IncomingTask[] = [];
+
+    for (const issue of issues) {
+      tasks.push({
+        id: `linear-${issue.identifier}`,
+        title: issue.title,
+        description: issue.description ?? "",
+        source: "linear",
+        priority: TaskPriority.NEW,
+        type: "new",
+        metadata: {
+          linearId: issue.id,
+          identifier: issue.identifier,
+          url: issue.url,
         },
-        body: JSON.stringify({
-          query,
-          variables: { teamId: project.linearTeamId },
-        }),
+        labels: issue.labels?.nodes?.map((l) => l.name) ?? [],
       });
-
-      const data = (await res.json()) as {
-        data?: { issues?: { nodes: LinearIssue[] } };
-      };
-      const issues = data.data?.issues?.nodes ?? [];
-      const tasks: IncomingTask[] = [];
-
-      for (const issue of issues) {
-        tasks.push({
-          id: `linear-${issue.identifier}`,
-          title: issue.title,
-          description: issue.description ?? "",
-          source: "linear",
-          priority: 2,
-          type: "new",
-          metadata: {
-            linearId: issue.id,
-            identifier: issue.identifier,
-            url: issue.url,
-          },
-          labels: issue.labels?.nodes?.map((l) => l.name) ?? [],
-        });
-      }
-
-      return tasks;
-    } catch (err) {
-      logger.error({ err }, "Failed to poll Linear");
-      return [];
     }
+
+    return tasks;
   }
 
   async onComplete(
@@ -92,7 +90,6 @@ export class LinearProvider implements TaskProvider {
     taskId: string,
     result: TaskResult,
   ): Promise<void> {
-    // Extract linear ID from metadata if available
     const linearId = taskId.replace("linear-", "");
 
     const stateName =

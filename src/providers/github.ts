@@ -1,14 +1,12 @@
-import type { TaskProvider, IncomingTask, TaskResult, ProjectContext } from "./types";
+import type { IncomingTask, TaskResult, ProjectContext } from "./types";
+import { BaseProvider } from "./base";
+import { TaskPriority } from "../core/queue";
+import { parseOwnerRepo } from "../core/git";
 import { logger } from "../utils/logger";
+import { fetchWithRetry } from "../utils/http";
 
 const GITHUB_API = "https://api.github.com";
-
-function parseRepo(repoUrl: string): { owner: string; repo: string } | null {
-  // Handle git@github.com:owner/repo.git and https://github.com/owner/repo
-  const sshMatch = repoUrl.match(/github\.com[:/](.+?)\/(.+?)(?:\.git)?$/);
-  if (sshMatch) return { owner: sshMatch[1], repo: sshMatch[2] };
-  return null;
-}
+const COMMENT_POLL_WINDOW_MS = 120_000;
 
 interface GitHubIssue {
   number: number;
@@ -26,18 +24,19 @@ interface GitHubComment {
   pull_request_url?: string;
 }
 
-export class GitHubProvider implements TaskProvider {
+export class GitHubProvider extends BaseProvider {
   name = "github";
   private token: string;
 
   constructor(token: string) {
+    super();
     this.token = token;
   }
 
   private async githubFetch(
     url: string,
   ): Promise<Response> {
-    return fetch(url, {
+    return fetchWithRetry(url, {
       headers: {
         Authorization: `token ${this.token}`,
         Accept: "application/vnd.github.v3+json",
@@ -45,9 +44,13 @@ export class GitHubProvider implements TaskProvider {
     });
   }
 
-  async poll(project: ProjectContext): Promise<IncomingTask[]> {
-    const parsed = parseRepo(project.repo);
-    if (!parsed) return [];
+  async fetchTasks(project: ProjectContext): Promise<IncomingTask[]> {
+    let parsed: { owner: string; repo: string };
+    try {
+      parsed = parseOwnerRepo(project.repo);
+    } catch {
+      return [];
+    }
 
     const tasks: IncomingTask[] = [];
 
@@ -67,7 +70,7 @@ export class GitHubProvider implements TaskProvider {
             title: issue.title,
             description: issue.body ?? "",
             source: "github",
-            priority: 2,
+            priority: TaskPriority.NEW,
             type: "new",
             metadata: {
               issueNumber: issue.number,
@@ -86,7 +89,7 @@ export class GitHubProvider implements TaskProvider {
 
     // Poll for PR comments on managed branches
     try {
-      const since = new Date(Date.now() - 120_000).toISOString();
+      const since = new Date(Date.now() - COMMENT_POLL_WINDOW_MS).toISOString();
       const commentsUrl = `${GITHUB_API}/repos/${parsed.owner}/${parsed.repo}/issues/comments?since=${since}&per_page=50`;
       const res = await this.githubFetch(commentsUrl);
 
@@ -102,7 +105,7 @@ export class GitHubProvider implements TaskProvider {
             title: "PR Feedback",
             description: comment.body,
             source: "github",
-            priority: 1, // Feedback is highest priority
+            priority: TaskPriority.FEEDBACK,
             type: "feedback",
             metadata: {
               commentId: comment.id,
