@@ -5,7 +5,8 @@ import { GitHubProvider } from "../providers/github";
 import { TaskQueue, type Task } from "./queue";
 import { TaskRunner } from "./runner";
 import { DispatchLedger } from "./ledger";
-import { resolveTargetAgents } from "./resolve-target-agents";
+import { resolveTargetAgents, resolveTargetAgentsWithModels } from "./resolve-target-agents";
+import { validateLabels } from "./validate-labels";
 import { loadProjectConfig, loadProjectsRegistry } from "../config/loader";
 import { logger } from "../utils/logger";
 
@@ -79,6 +80,19 @@ export class Poller {
         continue;
       }
 
+      // Validate labels config
+      const labelErrors = validateLabels(projectConfig);
+      if (labelErrors.length > 0) {
+        for (const err of labelErrors) {
+          logger.warn(
+            { project: projectName, label: err.label, type: err.type },
+            `Label validation: ${err.details}`,
+          );
+        }
+        logger.warn({ project: projectName }, "Skipping project due to label config errors");
+        continue;
+      }
+
       const context: ProjectContext = {
         name: projectName,
         path: entry.path,
@@ -131,16 +145,16 @@ export class Poller {
               continue;
             }
 
-            // Resolve which agents should handle this task based on labels
-            const targetAgents = resolveTargetAgents(
+            // Resolve which agents (and models) should handle this task based on labels
+            const targets = resolveTargetAgentsWithModels(
               incoming.labels,
               projectConfig,
             );
 
-            for (const agentName of targetAgents) {
-              // Multi-agent tasks get agent-suffixed IDs to avoid collision
-              const taskId = targetAgents.length > 1
-                ? `${incoming.id}-${agentName}`
+            for (const target of targets) {
+              // Multi-target tasks get suffixed IDs to avoid collision
+              const taskId = targets.length > 1
+                ? `${incoming.id}-${target.agent}${target.modelLabel ? `-${target.modelLabel}` : ""}`
                 : incoming.id;
 
               if (this.ledger.isDispatched(taskId)) continue;
@@ -159,13 +173,15 @@ export class Poller {
                   source: incoming.source,
                   metadata: incoming.metadata,
                   labels: incoming.labels,
-                  targetAgents: [agentName],
+                  targetAgents: [target.agent],
+                  targetModel: target.model,
+                  targetModelLabel: target.modelLabel,
                 },
               };
 
               if (this.queue.add(task)) {
                 logger.info(
-                  { taskId, project: projectName, source: provider.name, agent: agentName },
+                  { taskId, project: projectName, source: provider.name, agent: target.agent, model: target.model },
                   "Queued task for agent",
                 );
               }

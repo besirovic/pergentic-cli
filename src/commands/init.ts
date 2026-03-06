@@ -503,12 +503,93 @@ async function wizardStepConfigureLabels(
 	}
 }
 
+// --- Wizard step: Configure model labels ---
+
+async function wizardStepConfigureModelLabels(
+	selectedAgents: AgentNameType[],
+	config: ProjectConfig,
+): Promise<void> {
+	if (selectedAgents.length === 0) return;
+
+	console.log(chalk.bold("\n  Step 6: Model Labels\n"));
+	console.log(
+		chalk.dim("  Map ticket labels to specific models. When a ticket has a matching")
+	);
+	console.log(
+		chalk.dim("  label, the agent will use that model instead of its default.")
+	);
+	console.log(
+		chalk.dim("  Model labels implicitly select their agent (no agent label needed).\n")
+	);
+
+	const wantsModelLabels = await confirm({
+		message: "Configure model label routing?",
+		default: false,
+		theme: promptTheme,
+	});
+
+	if (!wantsModelLabels) return;
+
+	if (!config.modelLabels) {
+		config.modelLabels = {};
+	}
+
+	for (const agentName of selectedAgents) {
+		console.log(chalk.dim(`\n  ${agentDisplayName(agentName)}:`));
+
+		const existingLabels = config.modelLabels[agentName] ?? {};
+		let collecting = true;
+
+		const labelModelPairs: Record<string, string> = { ...existingLabels };
+
+		if (Object.keys(existingLabels).length > 0) {
+			console.log(chalk.dim(`  Existing: ${Object.entries(existingLabels).map(([l, m]) => `${l}→${m}`).join(", ")}`));
+		}
+
+		while (collecting) {
+			const labelName = await input({
+				message: `Label name for ${agentDisplayName(agentName)} (or empty to finish):`,
+				theme: promptTheme,
+			});
+
+			if (labelName.trim() === "") {
+				collecting = false;
+			} else {
+				const modelId = await input({
+					message: `Model ID for label "${labelName.trim()}":`,
+					validate: (v) => (v.trim().length > 0 ? true : "Model ID is required"),
+					theme: promptTheme,
+				});
+
+				labelModelPairs[labelName.trim()] = modelId.trim();
+				console.log(chalk.green(`  Added: ${labelName.trim()} → ${modelId.trim()}`));
+			}
+		}
+
+		if (Object.keys(labelModelPairs).length > 0) {
+			config.modelLabels[agentName] = labelModelPairs;
+		} else {
+			delete config.modelLabels[agentName];
+		}
+	}
+
+	const configured = Object.entries(config.modelLabels).filter(
+		([, labels]) => Object.keys(labels).length > 0
+	);
+	if (configured.length > 0) {
+		console.log(chalk.green(`\n  Model label routing configured for ${configured.length} agent(s).\n`));
+	} else {
+		delete config.modelLabels;
+		console.log(chalk.dim("\n  No model labels configured.\n"));
+	}
+}
+
 // --- Wizard step: Configure verification commands ---
 
 async function wizardStepConfigureVerification(
 	config: ProjectConfig,
 ): Promise<void> {
-	console.log(chalk.bold("\n  Step 6: Verification Commands\n"));
+	console.log(chalk.bold("\n  Step 7: Verification Commands\n"));
 
 	const wantsVerification = await confirm({
 		message: "Do you want to configure verification commands?",
@@ -651,10 +732,13 @@ export async function init(projectPath?: string): Promise<void> {
 		// Step 5: Configure agent labels
 		await wizardStepConfigureLabels(selectedAgents, config);
 
-		// Step 6: Configure verification commands
+		// Step 6: Configure model labels
+		await wizardStepConfigureModelLabels(selectedAgents, config);
+
+		// Step 7: Configure verification commands
 		await wizardStepConfigureVerification(config);
 
-		// --- Step 7: Remaining integrations (menu-based) ---
+		// --- Step 8: Remaining integrations (menu-based) ---
 		let continueMenu = true;
 		while (continueMenu) {
 			clearScreen();
@@ -739,6 +823,18 @@ export async function init(projectPath?: string): Promise<void> {
 			if (labels.length > 0) {
 				console.log(
 					`  ${chalk.green("✓")} ${agentDisplayName(agentName as AgentNameType)} labels: ${chalk.white(labels.join(", "))}`
+				);
+			}
+		}
+	}
+
+	if (config.modelLabels) {
+		for (const [agentName, labelMap] of Object.entries(config.modelLabels)) {
+			const entries = Object.entries(labelMap);
+			if (entries.length > 0) {
+				const display = entries.map(([l, m]) => `${l}→${m}`).join(", ");
+				console.log(
+					`  ${chalk.green("✓")} ${agentDisplayName(agentName as AgentNameType)} model labels: ${chalk.white(display)}`
 				);
 			}
 		}

@@ -22,4 +22,5 @@ export interface AgentOptions {
   allowedTools?: string[];
   systemContext?: string;
   maxCostPerTask?: number;
+  model?: string;
 }

@@ -132,6 +132,38 @@ describe("ProjectConfigSchema", () => {
     ).toThrow();
   });
 
+  it("parses modelLabels correctly", () => {
+    const result = ProjectConfigSchema.parse({
+      repo: "git@github.com:user/repo.git",
+      configuredAgents: ["claude-code", "codex"],
+      modelLabels: {
+        "claude-code": {
+          "claude-opus": "claude-opus-4-20250514",
+          "claude-sonnet": "claude-sonnet-4-20250514",
+        },
+        codex: {
+          "gpt-4.1": "gpt-4.1",
+        },
+      },
+    });
+    expect(result.modelLabels).toEqual({
+      "claude-code": {
+        "claude-opus": "claude-opus-4-20250514",
+        "claude-sonnet": "claude-sonnet-4-20250514",
+      },
+      codex: {
+        "gpt-4.1": "gpt-4.1",
+      },
+    });
+  });
+
+  it("modelLabels defaults to undefined when not provided", () => {
+    const result = ProjectConfigSchema.parse({
+      repo: "git@github.com:user/repo.git",
+    });
+    expect(result.modelLabels).toBeUndefined();
+  });
+
   it("rejects invalid jira email", () => {
     expect(() =>
       ProjectConfigSchema.parse({

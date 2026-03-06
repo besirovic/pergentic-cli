@@ -5,8 +5,12 @@ export const aider: Agent = {
   name: "aider",
   tools: [],
 
-  buildCommand(prompt: string, _workdir: string, _options?: AgentOptions): AgentCommand {
-    return { command: "aider", args: ["--message", prompt, "--yes"] };
+  buildCommand(prompt: string, _workdir: string, options?: AgentOptions): AgentCommand {
+    const args = ["--message", prompt, "--yes"];
+    if (options?.model) {
+      args.push("--model", options.model);
+    }
+    return { command: "aider", args };
   },
 
   async isInstalled(): Promise<boolean> {

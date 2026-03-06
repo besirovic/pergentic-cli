@@ -106,6 +106,7 @@ export class TaskRunner extends EventEmitter {
         instructions: projectConfig.claude?.instructions,
         allowedTools,
         maxCostPerTask: projectConfig.claude?.maxCostPerTask,
+        model: payload.targetModel,
       };
 
       const agentCmd = agent.buildCommand(prompt, worktree.path, agentOptions);
@@ -184,6 +185,7 @@ export class TaskRunner extends EventEmitter {
       instructions?: string;
       allowedTools?: string[];
       maxCostPerTask?: number;
+      model?: string;
     },
     agent: ReturnType<typeof resolveAgent>,
     startTime: number,
@@ -304,10 +306,14 @@ export class TaskRunner extends EventEmitter {
           const isLabelTriggered = payload.targetAgents && payload.targetAgents.length > 0;
           const prAgentName = payload.targetAgents?.[0] ?? projectConfig.agent;
 
+          const modelSuffix = payload.targetModelLabel
+            ? ` [${prAgentName}/${payload.targetModelLabel}]`
+            : (isLabelTriggered ? ` [${prAgentName}]` : "");
+
           const prTitle = (prConfig?.titleFormat ?? "feat: {taskTitle} [{taskId}]")
             .replace("{taskTitle}", payload.title)
             .replace("{taskId}", payload.taskId)
-            + (isLabelTriggered ? ` [${prAgentName}]` : "");
+            + modelSuffix;
 
           const prBody = (prConfig?.bodyTemplate ?? "Resolves {taskId}")
             .replace("{taskTitle}", payload.title)

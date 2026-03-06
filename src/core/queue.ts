@@ -18,6 +18,8 @@ export interface TaskPayload {
   metadata?: Record<string, unknown>;
   labels?: string[];
   targetAgents?: string[];
+  targetModel?: string;
+  targetModelLabel?: string;
 }
 
 export class TaskQueue {

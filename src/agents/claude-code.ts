@@ -27,6 +27,10 @@ export const claudeCode: Agent = {
 
     args.push("--allowedTools", tools.join(","));
 
+    if (options?.model) {
+      args.push("--model", options.model);
+    }
+
     return { command: "claude", args };
   },
 

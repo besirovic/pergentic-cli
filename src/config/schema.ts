@@ -118,6 +118,7 @@ export const ProjectConfigSchema = z.object({
 	linearTeamId: z.string().optional(),
 	agentTools: z.record(AgentName, z.array(z.string())).optional(),
 	agentLabels: z.record(AgentName, z.array(z.string())).optional(),
+	modelLabels: z.record(AgentName, z.record(z.string(), z.string())).optional(),
 	claude: ClaudeOptionsSchema.optional(),
 	pr: PRConfigSchema.optional(),
 	linear: LinearConfigSchema.optional(),

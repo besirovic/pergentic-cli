@@ -26,6 +26,10 @@ export const codex: Agent = {
       args.push("--auto-edit");
     }
 
+    if (options?.model) {
+      args.push("--model", options.model);
+    }
+
     return { command: "codex", args };
   },
 

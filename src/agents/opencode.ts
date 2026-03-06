@@ -26,6 +26,10 @@ export const opencode: Agent = {
       args.push("--tool", tool);
     }
 
+    if (options?.model) {
+      args.push("--model", options.model);
+    }
+
     return { command: "opencode", args };
   },
 
