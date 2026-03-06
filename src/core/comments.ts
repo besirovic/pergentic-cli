@@ -106,6 +106,96 @@ async function postJiraComment(
   }
 }
 
+export interface VerificationFailureContext {
+  task: Task;
+  projectConfig: ProjectConfig;
+  failedCommand: string;
+  output: string;
+  retries: number;
+}
+
+export async function postVerificationFailureComment(ctx: VerificationFailureContext): Promise<void> {
+  const body = [
+    "## Verification Failed — pergentic",
+    "",
+    `**Task:** ${ctx.task.payload.taskId}: ${ctx.task.payload.title}`,
+    `**Failed command:** \`${ctx.failedCommand}\``,
+    `**Retries exhausted:** ${ctx.retries}`,
+    "",
+    "**Last error output:**",
+    "```",
+    ctx.output.slice(-1500),
+    "```",
+    "",
+    "The coding agent was unable to fix this issue after multiple attempts. Manual intervention is required.",
+    "",
+    "---",
+    "*Automated by pergentic*",
+  ].join("\n");
+
+  const { payload } = ctx.task;
+  const { projectConfig } = ctx;
+  const promises: Promise<void>[] = [];
+
+  // Post on Linear issue if source is linear
+  if (
+    payload.source === "linear" &&
+    payload.metadata?.linearId &&
+    projectConfig.linearApiKey
+  ) {
+    promises.push(
+      postLinearComment(
+        payload.metadata.linearId as string,
+        body,
+        projectConfig.linearApiKey,
+      ).catch((err) => {
+        logger.error({ err }, "Failed to post Linear verification failure comment");
+      }),
+    );
+  }
+
+  // Post on GitHub issue if source is github
+  if (
+    payload.source === "github" &&
+    payload.metadata?.issueNumber &&
+    projectConfig.githubToken
+  ) {
+    promises.push(
+      replyToPRComment(
+        projectConfig.repo,
+        payload.metadata.issueNumber as number,
+        body,
+        projectConfig.githubToken,
+      ).catch((err) => {
+        logger.error({ err }, "Failed to post GitHub verification failure comment");
+      }),
+    );
+  }
+
+  // Post on Jira ticket if source is jira
+  if (
+    payload.source === ("jira" as string) &&
+    payload.metadata?.jiraIssueKey &&
+    projectConfig.jiraDomain &&
+    projectConfig.jiraEmail &&
+    projectConfig.jiraApiToken
+  ) {
+    promises.push(
+      postJiraComment(
+        payload.metadata.jiraIssueKey as string,
+        body,
+        projectConfig.jiraDomain,
+        projectConfig.jiraEmail,
+        projectConfig.jiraApiToken,
+      ).catch((err) => {
+        logger.error({ err }, "Failed to post Jira verification failure comment");
+      }),
+    );
+  }
+
+  await Promise.allSettled(promises);
+}
+
 export async function postTaskComments(ctx: CommentContext): Promise<void> {
   if (ctx.task.type !== "new") return;
 

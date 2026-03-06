@@ -1,13 +1,14 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { resolveAgent } from "../agents/resolve-agent";
-import { createWorktree, ensureRepoClone, removeWorktree, type WorktreeInfo } from "./worktree";
+import { createWorktree, ensureRepoClone, type WorktreeInfo } from "./worktree";
 import { commitAll, pushBranch, createPR, amendAndForcePush, pullBranch } from "./git";
 import { initHistory, addFeedbackRound, buildFeedbackPrompt, loadHistory } from "./feedback";
 import { notify, type TaskEvent } from "./notify";
-import { postTaskComments } from "./comments";
+import { postTaskComments, postVerificationFailureComment } from "./comments";
 import { recordTaskCost } from "./cost";
 import { recordEvent } from "./events";
+import { spawnAgentAndWait, runVerificationCommands, buildVerificationFixPrompt } from "./verify";
 import { logger } from "../utils/logger";
 import type { Task } from "./queue";
 import type { GlobalConfig, ProjectConfig } from "../config/schema";
@@ -19,7 +20,7 @@ export interface RunnerConfig {
 
 interface ActiveTask {
   task: Task;
-  process: ChildProcess;
+  process: ChildProcess | null;
   worktree: WorktreeInfo;
   startTime: number;
 }
@@ -98,11 +99,13 @@ export class TaskRunner extends EventEmitter {
       const allowedTools = projectConfig.agentTools?.[projectConfig.agent]
         ?? projectConfig.claude?.allowedTools;
 
-      const agentCmd = agent.buildCommand(prompt, worktree.path, {
+      const agentOptions = {
         instructions: projectConfig.claude?.instructions,
         allowedTools,
         maxCostPerTask: projectConfig.claude?.maxCostPerTask,
-      });
+      };
+
+      const agentCmd = agent.buildCommand(prompt, worktree.path, agentOptions);
 
       logger.info(
         {
@@ -114,46 +117,17 @@ export class TaskRunner extends EventEmitter {
         "Executing agent command",
       );
 
-      // Spawn agent process
-      const child = spawn(agentCmd.command, agentCmd.args, {
-        cwd: worktree.path,
-        env: {
-          ...process.env,
-          ...(projectConfig.anthropicApiKey && { ANTHROPIC_API_KEY: projectConfig.anthropicApiKey }),
-          ...(projectConfig.openaiApiKey && { OPENAI_API_KEY: projectConfig.openaiApiKey }),
-          ...(projectConfig.openrouterApiKey && { OPENROUTER_API_KEY: projectConfig.openrouterApiKey }),
-          ...(projectConfig.githubToken && { GITHUB_TOKEN: projectConfig.githubToken }),
-          ...agentCmd.env,
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-
-      // Capture agent output for error reporting
-      const stderrChunks: Buffer[] = [];
-      const stdoutChunks: Buffer[] = [];
-      const MAX_OUTPUT = 8192; // Keep last 8KB of output
-      let stderrLen = 0;
-      let stdoutLen = 0;
-
-      child.stderr?.on("data", (chunk: Buffer) => {
-        stderrChunks.push(chunk);
-        stderrLen += chunk.length;
-        while (stderrLen > MAX_OUTPUT && stderrChunks.length > 1) {
-          stderrLen -= stderrChunks.shift()!.length;
-        }
-      });
-
-      child.stdout?.on("data", (chunk: Buffer) => {
-        stdoutChunks.push(chunk);
-        stdoutLen += chunk.length;
-        while (stdoutLen > MAX_OUTPUT && stdoutChunks.length > 1) {
-          stdoutLen -= stdoutChunks.shift()!.length;
-        }
-      });
+      const agentEnv: Record<string, string | undefined> = {
+        ...(projectConfig.anthropicApiKey && { ANTHROPIC_API_KEY: projectConfig.anthropicApiKey }),
+        ...(projectConfig.openaiApiKey && { OPENAI_API_KEY: projectConfig.openaiApiKey }),
+        ...(projectConfig.openrouterApiKey && { OPENROUTER_API_KEY: projectConfig.openrouterApiKey }),
+        ...(projectConfig.githubToken && { GITHUB_TOKEN: projectConfig.githubToken }),
+        ...agentCmd.env,
+      };
 
       const activeTask: ActiveTask = {
         task,
-        process: child,
+        process: null,
         worktree,
         startTime,
       };
@@ -169,158 +143,12 @@ export class TaskRunner extends EventEmitter {
         title: payload.title,
       });
 
-      child.on("close", async (exitCode) => {
-        const stderr = Buffer.concat(stderrChunks).toString("utf-8").trim();
-        const stdout = Buffer.concat(stdoutChunks).toString("utf-8").trim();
-        this.active.delete(task.id);
-        const duration = Math.floor((Date.now() - startTime) / 1000);
-
-        if (exitCode === 0) {
-          try {
-            if (task.type === "feedback") {
-              await amendAndForcePush(worktree.path, worktree.branch);
-            } else {
-              const commitMsg = `feat: ${payload.title} [${payload.taskId}]`;
-              await commitAll(worktree.path, commitMsg);
-              await pushBranch(worktree.path, worktree.branch);
-
-              const prConfig = projectConfig.pr;
-              const prTitle = (prConfig?.titleFormat ?? "feat: {taskTitle} [{taskId}]")
-                .replace("{taskTitle}", payload.title)
-                .replace("{taskId}", payload.taskId);
-
-              const prBody = (prConfig?.bodyTemplate ?? "Resolves {taskId}")
-                .replace("{taskTitle}", payload.title)
-                .replace("{taskId}", payload.taskId);
-
-              const pr = await createPR(worktree.path, {
-                repo: projectConfig.repo,
-                branch: worktree.branch,
-                baseBranch: projectConfig.branch,
-                title: prTitle,
-                body: prBody,
-                labels: prConfig?.labels,
-                reviewers: prConfig?.reviewers,
-                githubToken: projectConfig.githubToken ?? "",
-              });
-
-              recordTaskCost(payload.taskId, 0, duration, true, false, {
-                project: projectName,
-                title: payload.title,
-                prUrl: pr.url,
-              });
-
-              recordEvent({
-                timestamp: new Date().toISOString(),
-                type: "prCreated",
-                taskId: payload.taskId,
-                project: projectName,
-                title: payload.title,
-                duration,
-                prUrl: pr.url,
-              });
-
-              const event: TaskEvent = {
-                type: "prCreated",
-                taskId: payload.taskId,
-                title: payload.title,
-                project: projectName,
-                prUrl: pr.url,
-                duration,
-              };
-              await notify(event, this.globalConfig, projectConfig);
-
-              await postTaskComments({
-                worktreePath: worktree.path,
-                repo: projectConfig.repo,
-                prUrl: pr.url,
-                prNumber: pr.number,
-                taskTitle: payload.title,
-                taskId: payload.taskId,
-                projectConfig,
-                task,
-              });
-            }
-
-            this.emit("taskCompleted", task);
-            logger.info(
-              { taskId: task.id, duration },
-              "Task completed successfully",
-            );
-          } catch (err) {
-            this.emit("taskFailed", task, err);
-            logger.error(
-              { taskId: task.id, err, stderr: stderr.slice(-2000), stdout: stdout.slice(-2000) },
-              "Post-agent steps failed",
-            );
-            recordTaskCost(payload.taskId, 0, duration, false, true, {
-              project: projectName,
-              title: payload.title,
-              error: String(err),
-            });
-
-            recordEvent({
-              timestamp: new Date().toISOString(),
-              type: "taskFailed",
-              taskId: payload.taskId,
-              project: projectName,
-              title: payload.title,
-              duration,
-              error: String(err),
-            });
-
-            const event: TaskEvent = {
-              type: "taskFailed",
-              taskId: payload.taskId,
-              title: payload.title,
-              project: projectName,
-              error: String(err),
-              duration,
-            };
-            await notify(event, this.globalConfig, projectConfig);
-          }
-        } else {
-          const lastStderrSnippet = stderr.slice(-2000);
-          const lastStdoutSnippet = stdout.slice(-2000);
-          const errorDetail = lastStderrSnippet || lastStdoutSnippet || "No output captured";
-
-          recordTaskCost(payload.taskId, 0, duration, false, true, {
-            project: projectName,
-            title: payload.title,
-            error: `Agent exited with code ${exitCode}: ${errorDetail.slice(0, 500)}`,
-          });
-
-          recordEvent({
-            timestamp: new Date().toISOString(),
-            type: "taskFailed",
-            taskId: payload.taskId,
-            project: projectName,
-            title: payload.title,
-            duration,
-            error: `Agent exited with code ${exitCode}: ${errorDetail.slice(0, 500)}`,
-          });
-
-          const errorJson = JSON.stringify(
-            { exitCode, detail: errorDetail.slice(0, 500) },
-            null,
-            2,
-          );
-
-          const event: TaskEvent = {
-            type: "taskFailed",
-            taskId: payload.taskId,
-            title: payload.title,
-            project: projectName,
-            error: errorJson,
-            duration,
-          };
-          await notify(event, this.globalConfig, projectConfig);
-          this.emit("taskFailed", task, new Error(`Exit code: ${exitCode}`));
-          logger.error(
-            { taskId: task.id, exitCode, duration, stderr: lastStderrSnippet, stdout: lastStdoutSnippet },
-            "Task failed",
-          );
-        }
+      // Run agent (async, non-blocking for the caller)
+      this.executeTask(
+        task, projectConfig, projectName, worktree, agentCmd, agentEnv,
+        agentOptions, agent, startTime,
+      ).catch((err) => {
+        logger.error({ taskId: task.id, err }, "Unhandled error in task execution");
       });
 
       return true;
@@ -342,6 +170,272 @@ export class TaskRunner extends EventEmitter {
     }
   }
 
+  private async executeTask(
+    task: Task,
+    projectConfig: ProjectConfig,
+    projectName: string,
+    worktree: WorktreeInfo,
+    agentCmd: ReturnType<ReturnType<typeof resolveAgent>["buildCommand"]>,
+    agentEnv: Record<string, string | undefined>,
+    agentOptions: {
+      instructions?: string;
+      allowedTools?: string[];
+      maxCostPerTask?: number;
+    },
+    agent: ReturnType<typeof resolveAgent>,
+    startTime: number,
+  ): Promise<void> {
+    const { payload } = task;
+
+    // Spawn initial agent
+    const result = await spawnAgentAndWait(agentCmd, worktree.path, agentEnv);
+    this.active.delete(task.id);
+    const duration = Math.floor((Date.now() - startTime) / 1000);
+
+    if (result.exitCode === 0) {
+      try {
+        if (task.type === "feedback") {
+          await amendAndForcePush(worktree.path, worktree.branch);
+        } else {
+          // Run verification commands for new tasks
+          const verifyConfig = projectConfig.verification;
+          const commands = verifyConfig?.commands ?? [];
+
+          if (commands.length > 0) {
+            const maxRetries = verifyConfig?.maxRetries ?? 3;
+            let retriesUsed = 0;
+            let verified = false;
+
+            while (retriesUsed <= maxRetries) {
+              const verifyResult = await runVerificationCommands(
+                worktree.path, commands, agentEnv,
+              );
+
+              if (verifyResult.success) {
+                verified = true;
+                break;
+              }
+
+              if (retriesUsed >= maxRetries) {
+                logger.error({
+                  taskId: task.id,
+                  failedCommand: verifyResult.failedCommand,
+                  retries: retriesUsed,
+                }, "Verification failed after max retries");
+
+                const event: TaskEvent = {
+                  type: "taskFailed",
+                  taskId: payload.taskId,
+                  title: payload.title,
+                  project: projectName,
+                  error: `Verification command "${verifyResult.failedCommand}" failed after ${retriesUsed} retries.\n\nOutput:\n${verifyResult.output?.slice(-1000)}`,
+                  duration,
+                };
+                await notify(event, this.globalConfig, projectConfig);
+
+                await postVerificationFailureComment({
+                  task,
+                  projectConfig,
+                  failedCommand: verifyResult.failedCommand!,
+                  output: verifyResult.output ?? "",
+                  retries: retriesUsed,
+                });
+
+                recordTaskCost(payload.taskId, 0, duration, false, true, {
+                  project: projectName,
+                  title: payload.title,
+                  error: `Verification failed: ${verifyResult.failedCommand}`,
+                });
+
+                recordEvent({
+                  timestamp: new Date().toISOString(),
+                  type: "taskFailed",
+                  taskId: payload.taskId,
+                  project: projectName,
+                  title: payload.title,
+                  duration,
+                  error: `Verification failed: ${verifyResult.failedCommand}`,
+                });
+
+                this.emit("taskFailed", task, new Error("Verification failed"));
+                return;
+              }
+
+              // Re-invoke the agent with the error
+              retriesUsed++;
+              logger.info({
+                taskId: task.id,
+                retry: retriesUsed,
+                maxRetries,
+                failedCommand: verifyResult.failedCommand,
+              }, "Re-invoking agent to fix verification failure");
+
+              const fixPrompt = buildVerificationFixPrompt(
+                verifyResult.failedCommand!,
+                verifyResult.output ?? "",
+                retriesUsed,
+                maxRetries,
+              );
+
+              const fixCmd = agent.buildCommand(fixPrompt, worktree.path, agentOptions);
+              const fixResult = await spawnAgentAndWait(fixCmd, worktree.path, agentEnv);
+
+              if (fixResult.exitCode !== 0) {
+                logger.warn({
+                  taskId: task.id,
+                  exitCode: fixResult.exitCode,
+                  retry: retriesUsed,
+                }, "Fix agent exited with non-zero code");
+              }
+            }
+
+            if (!verified) return;
+          }
+
+          // Proceed with commit → push → PR flow
+          const commitMsg = `feat: ${payload.title} [${payload.taskId}]`;
+          await commitAll(worktree.path, commitMsg);
+          await pushBranch(worktree.path, worktree.branch);
+
+          const prConfig = projectConfig.pr;
+          const prTitle = (prConfig?.titleFormat ?? "feat: {taskTitle} [{taskId}]")
+            .replace("{taskTitle}", payload.title)
+            .replace("{taskId}", payload.taskId);
+
+          const prBody = (prConfig?.bodyTemplate ?? "Resolves {taskId}")
+            .replace("{taskTitle}", payload.title)
+            .replace("{taskId}", payload.taskId);
+
+          const pr = await createPR(worktree.path, {
+            repo: projectConfig.repo,
+            branch: worktree.branch,
+            baseBranch: projectConfig.branch,
+            title: prTitle,
+            body: prBody,
+            labels: prConfig?.labels,
+            reviewers: prConfig?.reviewers,
+            githubToken: projectConfig.githubToken ?? "",
+          });
+
+          recordTaskCost(payload.taskId, 0, duration, true, false, {
+            project: projectName,
+            title: payload.title,
+            prUrl: pr.url,
+          });
+
+          recordEvent({
+            timestamp: new Date().toISOString(),
+            type: "prCreated",
+            taskId: payload.taskId,
+            project: projectName,
+            title: payload.title,
+            duration,
+            prUrl: pr.url,
+          });
+
+          const event: TaskEvent = {
+            type: "prCreated",
+            taskId: payload.taskId,
+            title: payload.title,
+            project: projectName,
+            prUrl: pr.url,
+            duration,
+          };
+          await notify(event, this.globalConfig, projectConfig);
+
+          await postTaskComments({
+            worktreePath: worktree.path,
+            repo: projectConfig.repo,
+            prUrl: pr.url,
+            prNumber: pr.number,
+            taskTitle: payload.title,
+            taskId: payload.taskId,
+            projectConfig,
+            task,
+          });
+        }
+
+        this.emit("taskCompleted", task);
+        logger.info(
+          { taskId: task.id, duration },
+          "Task completed successfully",
+        );
+      } catch (err) {
+        this.emit("taskFailed", task, err);
+        logger.error(
+          { taskId: task.id, err, stderr: result.stderr.slice(-2000), stdout: result.stdout.slice(-2000) },
+          "Post-agent steps failed",
+        );
+        recordTaskCost(payload.taskId, 0, duration, false, true, {
+          project: projectName,
+          title: payload.title,
+          error: String(err),
+        });
+
+        recordEvent({
+          timestamp: new Date().toISOString(),
+          type: "taskFailed",
+          taskId: payload.taskId,
+          project: projectName,
+          title: payload.title,
+          duration,
+          error: String(err),
+        });
+
+        const event: TaskEvent = {
+          type: "taskFailed",
+          taskId: payload.taskId,
+          title: payload.title,
+          project: projectName,
+          error: String(err),
+          duration,
+        };
+        await notify(event, this.globalConfig, projectConfig);
+      }
+    } else {
+      const lastStderrSnippet = result.stderr.slice(-2000);
+      const lastStdoutSnippet = result.stdout.slice(-2000);
+      const errorDetail = lastStderrSnippet || lastStdoutSnippet || "No output captured";
+
+      recordTaskCost(payload.taskId, 0, duration, false, true, {
+        project: projectName,
+        title: payload.title,
+        error: `Agent exited with code ${result.exitCode}: ${errorDetail.slice(0, 500)}`,
+      });
+
+      recordEvent({
+        timestamp: new Date().toISOString(),
+        type: "taskFailed",
+        taskId: payload.taskId,
+        project: projectName,
+        title: payload.title,
+        duration,
+        error: `Agent exited with code ${result.exitCode}: ${errorDetail.slice(0, 500)}`,
+      });
+
+      const errorJson = JSON.stringify(
+        { exitCode: result.exitCode, detail: errorDetail.slice(0, 500) },
+        null,
+        2,
+      );
+
+      const event: TaskEvent = {
+        type: "taskFailed",
+        taskId: payload.taskId,
+        title: payload.title,
+        project: projectName,
+        error: errorJson,
+        duration,
+      };
+      await notify(event, this.globalConfig, projectConfig);
+      this.emit("taskFailed", task, new Error(`Exit code: ${result.exitCode}`));
+      logger.error(
+        { taskId: task.id, exitCode: result.exitCode, duration, stderr: lastStderrSnippet, stdout: lastStdoutSnippet },
+        "Task failed",
+      );
+    }
+  }
+
   isActive(taskId: string): boolean {
     return this.active.has(taskId);
   }
@@ -350,7 +444,7 @@ export class TaskRunner extends EventEmitter {
     const active = this.active.get(taskId);
     if (!active) return false;
 
-    active.process.kill("SIGTERM");
+    active.process?.kill("SIGTERM");
     this.active.delete(taskId);
     return true;
   }
@@ -387,7 +481,7 @@ export class TaskRunner extends EventEmitter {
         clearInterval(check);
         // Force kill remaining
         for (const [id, active] of this.active) {
-          active.process.kill("SIGKILL");
+          active.process?.kill("SIGKILL");
           this.active.delete(id);
         }
         resolve();

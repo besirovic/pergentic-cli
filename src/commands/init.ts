@@ -440,6 +440,80 @@ async function wizardStepConfigureTools(
 	}
 }
 
+// --- Wizard step: Configure verification commands ---
+
+async function wizardStepConfigureVerification(
+	config: ProjectConfig,
+): Promise<void> {
+	console.log(chalk.bold("\n  Step 5: Verification Commands\n"));
+
+	const wantsVerification = await confirm({
+		message: "Do you want to configure verification commands?",
+		default: false,
+		theme: promptTheme,
+	});
+
+	if (!wantsVerification) return;
+
+	console.log(
+		chalk.dim(
+			"\n  Verification commands run sequentially after the coding agent completes."
+		)
+	);
+	console.log(
+		chalk.dim(
+			"  If a command fails, the agent is re-invoked to fix the issue.\n"
+		)
+	);
+
+	const commands: string[] = [];
+	let collecting = true;
+
+	while (collecting) {
+		const cmd = await input({
+			message: commands.length === 0
+				? "Enter a verification command:"
+				: "Enter another command (or leave empty to finish):",
+			validate: (v) => {
+				if (commands.length === 0 && v.trim() === "") {
+					return "At least one command is required";
+				}
+				return true;
+			},
+			theme: promptTheme,
+		});
+
+		if (cmd.trim() === "") {
+			collecting = false;
+		} else {
+			commands.push(cmd.trim());
+			console.log(chalk.green(`  Added: ${cmd.trim()}`));
+		}
+	}
+
+	const maxRetriesStr = await input({
+		message: "Max retries for fixing verification failures:",
+		default: "3",
+		validate: (v) => {
+			const n = Number(v);
+			if (Number.isNaN(n) || !Number.isInteger(n) || n < 0 || n > 20) {
+				return "Must be an integer between 0 and 20";
+			}
+			return true;
+		},
+		theme: promptTheme,
+	});
+
+	config.verification = {
+		commands,
+		maxRetries: Number(maxRetriesStr),
+	};
+
+	console.log(
+		chalk.green(`\n  ${commands.length} verification command(s) configured.\n`)
+	);
+}
+
 // --- Main init function ---
 
 export async function init(projectPath?: string): Promise<void> {
@@ -511,7 +585,10 @@ export async function init(projectPath?: string): Promise<void> {
 		// Step 4: Configure agent tools
 		await wizardStepConfigureTools(selectedAgents, config);
 
-		// --- Step 5: Remaining integrations (menu-based) ---
+		// Step 5: Configure verification commands
+		await wizardStepConfigureVerification(config);
+
+		// --- Step 6: Remaining integrations (menu-based) ---
 		let continueMenu = true;
 		while (continueMenu) {
 			clearScreen();
@@ -589,6 +666,11 @@ export async function init(projectPath?: string): Promise<void> {
 				);
 			}
 		}
+	}
+
+	if (config.verification?.commands?.length) {
+		console.log(`  ${chalk.green("✓")} Verification: ${chalk.white(config.verification.commands.join(" → "))}`);
+		console.log(`  ${chalk.green("✓")} Max retries: ${chalk.white(String(config.verification.maxRetries))}`);
 	}
 
 	const configuredIntegrations = menuCategories.filter(

@@ -90,6 +90,11 @@ const FeedbackConfigSchema = z.object({
 	maxRounds: z.number().default(5),
 });
 
+const VerificationConfigSchema = z.object({
+	commands: z.array(z.string()).default([]),
+	maxRetries: z.number().min(0).max(20).default(3),
+});
+
 const SlackProjectConfigSchema = z.object({
 	channels: z.record(z.string(), z.string()).optional(),
 });
@@ -116,6 +121,7 @@ export const ProjectConfigSchema = z.object({
 	pr: PRConfigSchema.optional(),
 	linear: LinearConfigSchema.optional(),
 	feedback: FeedbackConfigSchema.optional(),
+	verification: VerificationConfigSchema.optional(),
 	slack: SlackProjectConfigSchema.optional(),
 	notifications: NotificationsSchema.optional(),
 });
