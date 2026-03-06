@@ -117,6 +117,7 @@ export class SlackProvider implements TaskProvider {
 				threadTs: event.thread_ts ?? event.ts,
 				resolvedProject: project,
 			},
+			labels: [],
 		});
 	}
 

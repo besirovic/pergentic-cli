@@ -74,6 +74,7 @@ export class GitHubProvider implements TaskProvider {
               owner: parsed.owner,
               repo: parsed.repo,
             },
+            labels: issue.labels.map((l) => l.name),
           });
         }
       } else {
@@ -109,6 +110,7 @@ export class GitHubProvider implements TaskProvider {
               owner: parsed.owner,
               repo: parsed.repo,
             },
+            labels: [],
           });
         }
       } else {

@@ -117,6 +117,7 @@ export const ProjectConfigSchema = z.object({
 	jiraApiToken: z.string().optional(),
 	linearTeamId: z.string().optional(),
 	agentTools: z.record(AgentName, z.array(z.string())).optional(),
+	agentLabels: z.record(AgentName, z.array(z.string())).optional(),
 	claude: ClaudeOptionsSchema.optional(),
 	pr: PRConfigSchema.optional(),
 	linear: LinearConfigSchema.optional(),

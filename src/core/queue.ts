@@ -16,6 +16,8 @@ export interface TaskPayload {
   prNumber?: number;
   comment?: string;
   metadata?: Record<string, unknown>;
+  labels?: string[];
+  targetAgents?: string[];
 }
 
 export class TaskQueue {

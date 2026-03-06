@@ -6,6 +6,7 @@ export interface IncomingTask {
   priority: number;
   type: "new" | "feedback";
   metadata: Record<string, unknown>;
+  labels: string[];
 }
 
 export interface TaskResult {

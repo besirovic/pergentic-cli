@@ -440,12 +440,75 @@ async function wizardStepConfigureTools(
 	}
 }
 
+// --- Wizard step: Configure agent labels ---
+
+async function wizardStepConfigureLabels(
+	selectedAgents: AgentNameType[],
+	config: ProjectConfig,
+): Promise<void> {
+	if (selectedAgents.length < 2) return;
+
+	console.log(chalk.bold("\n  Step 5: Agent Labels\n"));
+	console.log(
+		chalk.dim("  Map ticket labels to agents. When a ticket has a matching")
+	);
+	console.log(
+		chalk.dim("  label, that agent will execute it instead of the default.")
+	);
+	console.log(
+		chalk.dim("  If multiple labels match different agents, all matched agents")
+	);
+	console.log(chalk.dim("  will execute the task and create separate PRs.\n"));
+
+	const wantsLabels = await confirm({
+		message: "Configure label-based agent routing?",
+		default: false,
+		theme: promptTheme,
+	});
+
+	if (!wantsLabels) return;
+
+	if (!config.agentLabels) {
+		config.agentLabels = {};
+	}
+
+	for (const agentName of selectedAgents) {
+		const existing = config.agentLabels[agentName]?.join(", ") ?? "";
+		const labelsStr = await input({
+			message: `Labels for ${agentDisplayName(agentName)} (comma-separated):`,
+			default: existing,
+			theme: promptTheme,
+		});
+
+		const labels = labelsStr
+			.split(",")
+			.map((l) => l.trim())
+			.filter(Boolean);
+
+		if (labels.length > 0) {
+			config.agentLabels[agentName] = labels;
+		} else {
+			delete config.agentLabels[agentName];
+		}
+	}
+
+	const configured = Object.entries(config.agentLabels).filter(
+		([, labels]) => labels.length > 0
+	);
+	if (configured.length > 0) {
+		console.log(chalk.green(`\n  Label routing configured for ${configured.length} agent(s).\n`));
+	} else {
+		delete config.agentLabels;
+		console.log(chalk.dim("\n  No labels configured. Default agent will handle all tasks.\n"));
+	}
+}
+
 // --- Wizard step: Configure verification commands ---
 
 async function wizardStepConfigureVerification(
 	config: ProjectConfig,
 ): Promise<void> {
-	console.log(chalk.bold("\n  Step 5: Verification Commands\n"));
+	console.log(chalk.bold("\n  Step 6: Verification Commands\n"));
 
 	const wantsVerification = await confirm({
 		message: "Do you want to configure verification commands?",
@@ -585,10 +648,13 @@ export async function init(projectPath?: string): Promise<void> {
 		// Step 4: Configure agent tools
 		await wizardStepConfigureTools(selectedAgents, config);
 
-		// Step 5: Configure verification commands
+		// Step 5: Configure agent labels
+		await wizardStepConfigureLabels(selectedAgents, config);
+
+		// Step 6: Configure verification commands
 		await wizardStepConfigureVerification(config);
 
-		// --- Step 6: Remaining integrations (menu-based) ---
+		// --- Step 7: Remaining integrations (menu-based) ---
 		let continueMenu = true;
 		while (continueMenu) {
 			clearScreen();
@@ -663,6 +729,16 @@ export async function init(projectPath?: string): Promise<void> {
 			if (tools.length > 0) {
 				console.log(
 					`  ${chalk.green("✓")} ${agentDisplayName(agentName as AgentNameType)} tools: ${chalk.white(tools.join(", "))}`
+				);
+			}
+		}
+	}
+
+	if (config.agentLabels) {
+		for (const [agentName, labels] of Object.entries(config.agentLabels)) {
+			if (labels.length > 0) {
+				console.log(
+					`  ${chalk.green("✓")} ${agentDisplayName(agentName as AgentNameType)} labels: ${chalk.white(labels.join(", "))}`
 				);
 			}
 		}

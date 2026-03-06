@@ -5,6 +5,7 @@ import { GitHubProvider } from "../providers/github";
 import { TaskQueue, type Task } from "./queue";
 import { TaskRunner } from "./runner";
 import { DispatchLedger } from "./ledger";
+import { resolveTargetAgents } from "./resolve-target-agents";
 import { loadProjectConfig, loadProjectsRegistry } from "../config/loader";
 import { logger } from "../utils/logger";
 
@@ -100,36 +101,74 @@ export class Poller {
         try {
           const tasks = await provider.poll(context);
           for (const incoming of tasks) {
-            // Skip if already dispatched to an agent (persistent check)
-            if (this.ledger.isDispatched(incoming.id)) {
+            // Feedback tasks skip label resolution — they use the original agent
+            if (incoming.type === "feedback") {
+              if (this.ledger.isDispatched(incoming.id)) continue;
+              if (this.runner.isActive(incoming.id)) continue;
+
+              const task: Task = {
+                id: incoming.id,
+                project: projectName,
+                priority: incoming.priority,
+                type: incoming.type,
+                createdAt: Date.now(),
+                payload: {
+                  taskId: incoming.id,
+                  title: incoming.title,
+                  description: incoming.description,
+                  source: incoming.source,
+                  metadata: incoming.metadata,
+                  labels: incoming.labels,
+                },
+              };
+
+              if (this.queue.add(task)) {
+                logger.info(
+                  { taskId: task.id, project: projectName, source: provider.name },
+                  "Queued feedback task",
+                );
+              }
               continue;
             }
 
-            // Skip if currently being executed by the runner
-            if (this.runner.isActive(incoming.id)) {
-              continue;
-            }
+            // Resolve which agents should handle this task based on labels
+            const targetAgents = resolveTargetAgents(
+              incoming.labels,
+              projectConfig,
+            );
 
-            const task: Task = {
-              id: incoming.id,
-              project: projectName,
-              priority: incoming.priority,
-              type: incoming.type,
-              createdAt: Date.now(),
-              payload: {
-                taskId: incoming.id,
-                title: incoming.title,
-                description: incoming.description,
-                source: incoming.source,
-                metadata: incoming.metadata,
-              },
-            };
+            for (const agentName of targetAgents) {
+              // Multi-agent tasks get agent-suffixed IDs to avoid collision
+              const taskId = targetAgents.length > 1
+                ? `${incoming.id}-${agentName}`
+                : incoming.id;
 
-            if (this.queue.add(task)) {
-              logger.info(
-                { taskId: task.id, project: projectName, source: provider.name },
-                "Queued new task",
-              );
+              if (this.ledger.isDispatched(taskId)) continue;
+              if (this.runner.isActive(taskId)) continue;
+
+              const task: Task = {
+                id: taskId,
+                project: projectName,
+                priority: incoming.priority,
+                type: incoming.type,
+                createdAt: Date.now(),
+                payload: {
+                  taskId: taskId,
+                  title: incoming.title,
+                  description: incoming.description,
+                  source: incoming.source,
+                  metadata: incoming.metadata,
+                  labels: incoming.labels,
+                  targetAgents: [agentName],
+                },
+              };
+
+              if (this.queue.add(task)) {
+                logger.info(
+                  { taskId, project: projectName, source: provider.name, agent: agentName },
+                  "Queued task for agent",
+                );
+              }
             }
           }
         } catch (err) {

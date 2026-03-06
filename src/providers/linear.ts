@@ -10,6 +10,7 @@ interface LinearIssue {
   description: string;
   url: string;
   state: { name: string };
+  labels: { nodes: Array<{ name: string }> };
 }
 
 export class LinearProvider implements TaskProvider {
@@ -36,6 +37,7 @@ export class LinearProvider implements TaskProvider {
             description
             url
             state { name }
+            labels { nodes { name } }
           }
         }
       }
@@ -75,6 +77,7 @@ export class LinearProvider implements TaskProvider {
             identifier: issue.identifier,
             url: issue.url,
           },
+          labels: issue.labels?.nodes?.map((l) => l.name) ?? [],
         });
       }
 

@@ -11,6 +11,7 @@ import { recordEvent } from "./events";
 import { spawnAgentAndWait, runVerificationCommands, buildVerificationFixPrompt } from "./verify";
 import { logger } from "../utils/logger";
 import type { Task } from "./queue";
+import { AgentName } from "../config/schema";
 import type { GlobalConfig, ProjectConfig } from "../config/schema";
 
 export interface RunnerConfig {
@@ -94,9 +95,11 @@ export class TaskRunner extends EventEmitter {
         prompt = contextParts.join("\n\n");
       }
 
-      // Resolve agent
-      const agent = resolveAgent(projectConfig.agent);
-      const allowedTools = projectConfig.agentTools?.[projectConfig.agent]
+      // Resolve agent — use label-targeted agent if specified, otherwise default
+      const rawAgentName = payload.targetAgents?.[0] ?? projectConfig.agent;
+      const parsedAgent = AgentName.catch("claude-code").parse(rawAgentName);
+      const agent = resolveAgent(parsedAgent);
+      const allowedTools = projectConfig.agentTools?.[parsedAgent]
         ?? projectConfig.claude?.allowedTools;
 
       const agentOptions = {
@@ -298,9 +301,13 @@ export class TaskRunner extends EventEmitter {
           await pushBranch(worktree.path, worktree.branch);
 
           const prConfig = projectConfig.pr;
+          const isLabelTriggered = payload.targetAgents && payload.targetAgents.length > 0;
+          const prAgentName = payload.targetAgents?.[0] ?? projectConfig.agent;
+
           const prTitle = (prConfig?.titleFormat ?? "feat: {taskTitle} [{taskId}]")
             .replace("{taskTitle}", payload.title)
-            .replace("{taskId}", payload.taskId);
+            .replace("{taskId}", payload.taskId)
+            + (isLabelTriggered ? ` [${prAgentName}]` : "");
 
           const prBody = (prConfig?.bodyTemplate ?? "Resolves {taskId}")
             .replace("{taskTitle}", payload.title)
