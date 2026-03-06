@@ -21,6 +21,10 @@ export function daemonPidPath(): string {
 	return join(pergenticHome(), "daemon.pid");
 }
 
+export function daemonLockPath(): string {
+	return join(pergenticHome(), "daemon.lock");
+}
+
 export function daemonLogPath(): string {
 	return join(pergenticHome(), "daemon.log");
 }

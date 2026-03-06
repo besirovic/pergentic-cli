@@ -1,4 +1,4 @@
-import { readPid, removePid, isRunning } from "../utils/health";
+import { readPid, removePid, releaseLock, isRunning } from "../utils/health";
 
 export async function stop(): Promise<void> {
 	if (!isRunning()) {
@@ -15,9 +15,11 @@ export async function stop(): Promise<void> {
 	try {
 		process.kill(pid, "SIGTERM");
 		removePid();
+		releaseLock();
 		console.log("Pergentic stopped.");
 	} catch {
 		removePid();
+		releaseLock();
 		console.log("Pergentic was not running (stale PID file cleaned up).");
 	}
 }

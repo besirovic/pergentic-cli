@@ -7,12 +7,21 @@ import { TaskQueue } from "./core/queue";
 import { TaskRunner } from "./core/runner";
 import { Poller } from "./core/poller";
 import { DispatchLedger } from "./core/ledger";
+import { acquireLock, releaseLock } from "./utils/health";
 
 const logger = createLogger("daemon");
 let shuttingDown = false;
 
 async function main(): Promise<void> {
 	ensureGlobalConfigDir();
+
+	if (!acquireLock()) {
+		logger.fatal("Another instance of Pergentic is already running. Exiting.");
+		console.error("Error: Another instance of Pergentic is already running.");
+		console.error("Run `pergentic stop` to stop it first.");
+		process.exit(1);
+	}
+
 	const config = loadGlobalConfig();
 
 	logger.info("Pergentic daemon starting");
@@ -119,6 +128,7 @@ async function main(): Promise<void> {
 
 		server.close();
 		updateState(runner, queue);
+		releaseLock();
 		logger.info("Daemon stopped");
 		process.exit(0);
 	};
@@ -175,5 +185,6 @@ function loadTodayStats(): {
 
 main().catch((err) => {
 	logger.fatal({ err }, "Daemon crashed");
+	releaseLock();
 	process.exit(1);
 });

@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
-import { daemonPidPath } from "../config/paths";
+import { readFileSync, writeFileSync, openSync, closeSync, unlinkSync, existsSync } from "node:fs";
+import { daemonPidPath, daemonLockPath } from "../config/paths";
 
 export function writePid(pid: number): void {
   writeFileSync(daemonPidPath(), String(pid), "utf-8");
@@ -32,5 +32,42 @@ export function removePid(): void {
   const pidFile = daemonPidPath();
   if (existsSync(pidFile)) {
     unlinkSync(pidFile);
+  }
+}
+
+/**
+ * Acquire an exclusive lock file. Returns true if acquired, false if another instance holds it.
+ * Uses the 'wx' flag (write + exclusive create) for atomic lock acquisition.
+ */
+export function acquireLock(): boolean {
+  const lockFile = daemonLockPath();
+  try {
+    const fd = openSync(lockFile, "wx");
+    writeFileSync(fd, String(process.pid), "utf-8");
+    closeSync(fd);
+    return true;
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+      // Lock file exists — check if the process that created it is still alive
+      try {
+        const lockPid = parseInt(readFileSync(lockFile, "utf-8").trim(), 10);
+        if (!Number.isNaN(lockPid)) {
+          process.kill(lockPid, 0); // throws if process doesn't exist
+          return false; // process is alive, lock is valid
+        }
+      } catch {
+        // Process is dead or PID unreadable — stale lock, remove and retry
+      }
+      unlinkSync(lockFile);
+      return acquireLock();
+    }
+    return false;
+  }
+}
+
+export function releaseLock(): void {
+  const lockFile = daemonLockPath();
+  if (existsSync(lockFile)) {
+    unlinkSync(lockFile);
   }
 }
