@@ -15,6 +15,7 @@ import {
 import { projectConfigPath } from "../config/paths";
 import { ensureRepoClone } from "../core/worktree";
 import { resolveAgent } from "../agents/resolve-agent";
+import { extractSecrets, saveProjectEnv, migrateConfigSecrets } from "../config/env";
 import type { ProjectConfig } from "../config/schema";
 
 type AgentNameType = ProjectConfig["configuredAgents"][number];
@@ -462,6 +463,14 @@ export async function init(projectPath?: string): Promise<void> {
 	const configFile = projectConfigPath(absPath);
 	let config: ProjectConfig;
 	if (existsSync(configFile)) {
+		// Migrate any hardcoded secrets from config.yaml to .env
+		const migration = migrateConfigSecrets(absPath);
+		if (migration.migrated) {
+			console.log(
+				chalk.green(`  Migrated ${migration.fields.length} secret(s) from config.yaml to .pergentic/.env`)
+			);
+			console.log();
+		}
 		config = loadProjectConfig(absPath);
 	} else {
 		config = {
@@ -605,8 +614,15 @@ export async function init(projectPath?: string): Promise<void> {
 	}
 	console.log();
 
-	// Save project config
-	saveProjectConfig(absPath, config);
+	// Extract secrets from config and write to .env file
+	const { secrets, cleaned } = extractSecrets(config as unknown as Record<string, unknown>);
+	if (Object.keys(secrets).length > 0) {
+		saveProjectEnv(absPath, secrets);
+		console.log(`  ${chalk.green("✓")} Secrets saved to ${chalk.dim(".pergentic/.env")}`);
+	}
+
+	// Save project config without secrets
+	saveProjectConfig(absPath, cleaned as unknown as ProjectConfig);
 
 	// Register in projects registry
 	ensureGlobalConfigDir();

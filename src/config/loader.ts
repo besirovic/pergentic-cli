@@ -15,6 +15,7 @@ import {
   projectConfigPath,
   globalConfigDir,
 } from "./paths";
+import { loadSecrets, SECRET_FIELDS } from "./env";
 
 function readYaml(filePath: string): unknown {
   if (!existsSync(filePath)) return {};
@@ -40,7 +41,18 @@ export function saveGlobalConfig(config: GlobalConfig): void {
 export function loadProjectConfig(projectPath: string): ProjectConfig {
   const configFile = projectConfigPath(projectPath);
   const raw = readYaml(configFile);
-  return ProjectConfigSchema.parse(raw);
+  const config = ProjectConfigSchema.parse(raw);
+
+  // Merge env-based secrets: config values take precedence (backwards compat)
+  const secrets = loadSecrets(projectPath);
+  for (const field of Object.keys(SECRET_FIELDS)) {
+    const key = field as keyof typeof secrets;
+    if (config[key] === undefined && secrets[key] !== undefined) {
+      (config as Record<string, unknown>)[key] = secrets[key];
+    }
+  }
+
+  return config;
 }
 
 export function saveProjectConfig(

@@ -119,7 +119,10 @@ export class TaskRunner extends EventEmitter {
         cwd: worktree.path,
         env: {
           ...process.env,
-          ANTHROPIC_API_KEY: projectConfig.anthropicApiKey ?? "",
+          ...(projectConfig.anthropicApiKey && { ANTHROPIC_API_KEY: projectConfig.anthropicApiKey }),
+          ...(projectConfig.openaiApiKey && { OPENAI_API_KEY: projectConfig.openaiApiKey }),
+          ...(projectConfig.openrouterApiKey && { OPENROUTER_API_KEY: projectConfig.openrouterApiKey }),
+          ...(projectConfig.githubToken && { GITHUB_TOKEN: projectConfig.githubToken }),
           ...agentCmd.env,
         },
         stdio: ["ignore", "pipe", "pipe"],

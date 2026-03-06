@@ -50,6 +50,10 @@ export function projectConfigPath(projectPath: string): string {
 	return join(projectPath, ".pergentic", "config.yaml");
 }
 
+export function projectEnvPath(projectPath: string): string {
+	return join(projectPath, ".pergentic", ".env");
+}
+
 export function eventsFilePath(): string {
 	return join(pergenticHome(), "events.jsonl");
 }

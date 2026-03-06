@@ -76,6 +76,54 @@ describe("config loader", () => {
 		expect(loaded.agent).toBe("claude-code");
 	});
 
+	it("merges env secrets into project config", () => {
+		const projectPath = join(TEST_HOME, "env-project");
+		mkdirSync(join(projectPath, ".pergentic"), { recursive: true });
+
+		// Save config without secrets
+		const config = {
+			repo: "git@github.com:user/repo.git",
+			branch: "main",
+			agent: "claude-code" as const,
+			configuredAgents: [] as ("claude-code" | "codex" | "aider" | "opencode")[],
+		};
+		saveProjectConfig(projectPath, config);
+
+		// Write secrets to project .env
+		writeFileSync(
+			join(projectPath, ".pergentic", ".env"),
+			"PERGENTIC_ANTHROPIC_API_KEY=sk-ant-from-env\nPERGENTIC_GITHUB_TOKEN=ghp_from_env\n",
+		);
+
+		const loaded = loadProjectConfig(projectPath);
+		expect(loaded.anthropicApiKey).toBe("sk-ant-from-env");
+		expect(loaded.githubToken).toBe("ghp_from_env");
+	});
+
+	it("config file secrets take precedence over env secrets", () => {
+		const projectPath = join(TEST_HOME, "precedence-project");
+		mkdirSync(join(projectPath, ".pergentic"), { recursive: true });
+
+		// Save config with a secret
+		const config = {
+			repo: "git@github.com:user/repo.git",
+			branch: "main",
+			agent: "claude-code" as const,
+			configuredAgents: [] as ("claude-code" | "codex" | "aider" | "opencode")[],
+			anthropicApiKey: "sk-ant-from-config",
+		};
+		saveProjectConfig(projectPath, config);
+
+		// Write different secret to .env
+		writeFileSync(
+			join(projectPath, ".pergentic", ".env"),
+			"PERGENTIC_ANTHROPIC_API_KEY=sk-ant-from-env\n",
+		);
+
+		const loaded = loadProjectConfig(projectPath);
+		expect(loaded.anthropicApiKey).toBe("sk-ant-from-config");
+	});
+
 	it("ensures global config dir exists", () => {
 		const newHome = join(TEST_HOME, "nested", "deep");
 		process.env.PERGENTIC_HOME = newHome;
