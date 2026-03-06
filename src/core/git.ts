@@ -64,6 +64,26 @@ export async function createPR(
   options: PROptions,
 ): Promise<PRResult> {
   const { owner, repo } = parseOwnerRepo(options.repo);
+  const base = options.baseBranch ?? "main";
+
+  // Check for an existing open PR for this head/base pair
+  const existingResponse = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/pulls?head=${owner}:${options.branch}&base=${base}&state=open`,
+    {
+      headers: {
+        Authorization: `Bearer ${options.githubToken}`,
+        Accept: "application/vnd.github+json",
+      },
+    },
+  );
+
+  if (existingResponse.ok) {
+    const existing = (await existingResponse.json()) as { html_url: string; number: number }[];
+    if (existing.length > 0) {
+      logger.info({ url: existing[0].html_url, prNumber: existing[0].number, branch: options.branch }, "PR already exists, skipping creation");
+      return { url: existing[0].html_url, number: existing[0].number };
+    }
+  }
 
   const response = await fetch(
     `https://api.github.com/repos/${owner}/${repo}/pulls`,
@@ -78,7 +98,7 @@ export async function createPR(
         title: options.title,
         body: options.body,
         head: options.branch,
-        base: options.baseBranch ?? "main",
+        base,
       }),
     },
   );
@@ -151,6 +171,21 @@ export async function replyToPRComment(
     const errorBody = await response.text();
     throw new Error(`Failed to comment on PR (${response.status}): ${errorBody}`);
   }
+}
+
+export async function getChangeSummary(
+  worktreePath: string,
+): Promise<{ stats: string; commitMessage: string }> {
+  const git = simpleGit(worktreePath);
+
+  const log = await git.log({ maxCount: 1 });
+  const commitMessage = log.latest?.message ?? "";
+
+  const diff = await git.diff(["--stat", "HEAD~1", "HEAD"]);
+  const lines = diff.trim().split("\n");
+  const stats = lines[lines.length - 1]?.trim() ?? "";
+
+  return { stats, commitMessage };
 }
 
 export async function pullBranch(

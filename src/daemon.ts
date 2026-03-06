@@ -6,6 +6,7 @@ import { loadGlobalConfig, ensureGlobalConfigDir } from "./config/loader";
 import { TaskQueue } from "./core/queue";
 import { TaskRunner } from "./core/runner";
 import { Poller } from "./core/poller";
+import { DispatchLedger } from "./core/ledger";
 
 const logger = createLogger("daemon");
 let shuttingDown = false;
@@ -15,6 +16,10 @@ async function main(): Promise<void> {
 	const config = loadGlobalConfig();
 
 	logger.info("Pergentic daemon starting");
+
+	// Initialize dispatch ledger (persistent deduplication)
+	const ledger = new DispatchLedger();
+	ledger.load();
 
 	// Initialize queue and runner
 	const queue = new TaskQueue();
@@ -26,7 +31,7 @@ async function main(): Promise<void> {
 	// Initialize poller
 	const poller = new Poller(queue, runner, {
 		pollInterval: config.pollInterval,
-	});
+	}, ledger);
 
 	// State file update loop
 	const stateInterval = setInterval(() => {

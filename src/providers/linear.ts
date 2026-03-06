@@ -8,6 +8,7 @@ interface LinearIssue {
   identifier: string;
   title: string;
   description: string;
+  url: string;
   state: { name: string };
 }
 
@@ -33,6 +34,7 @@ export class LinearProvider implements TaskProvider {
             identifier
             title
             description
+            url
             state { name }
           }
         }
@@ -71,6 +73,7 @@ export class LinearProvider implements TaskProvider {
           metadata: {
             linearId: issue.id,
             identifier: issue.identifier,
+            url: issue.url,
           },
         });
       }

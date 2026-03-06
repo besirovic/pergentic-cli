@@ -117,6 +117,22 @@ export function createProgram(): Command {
 		);
 
 	program
+		.command("history")
+		.description("View task history and details")
+		.argument("[taskId]", "Task ID to show details for")
+		.option("--project <name>", "Filter by project name")
+		.option("-n, --limit <count>", "Number of entries to show", "20")
+		.action(
+			async (
+				taskId: string | undefined,
+				opts: { project?: string; limit: string }
+			) => {
+				const { history } = await import("./commands/history.js");
+				await history({ taskId, ...opts });
+			}
+		);
+
+	program
 		.command("retry")
 		.description("Retry a failed task")
 		.argument("<taskId>", "Task ID to retry")

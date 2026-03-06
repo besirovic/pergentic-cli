@@ -4,6 +4,7 @@ import { LinearProvider } from "../providers/linear";
 import { GitHubProvider } from "../providers/github";
 import { TaskQueue, type Task } from "./queue";
 import { TaskRunner } from "./runner";
+import { DispatchLedger } from "./ledger";
 import { loadProjectConfig, loadProjectsRegistry } from "../config/loader";
 import { logger } from "../utils/logger";
 
@@ -14,6 +15,7 @@ export interface PollerConfig {
 export class Poller {
   private queue: TaskQueue;
   private runner: TaskRunner;
+  private ledger: DispatchLedger;
   private pollInterval: number;
   private running = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -22,9 +24,11 @@ export class Poller {
     queue: TaskQueue,
     runner: TaskRunner,
     config: PollerConfig,
+    ledger: DispatchLedger,
   ) {
     this.queue = queue;
     this.runner = runner;
+    this.ledger = ledger;
     this.pollInterval = config.pollInterval * 1000;
   }
 
@@ -96,6 +100,16 @@ export class Poller {
         try {
           const tasks = await provider.poll(context);
           for (const incoming of tasks) {
+            // Skip if already dispatched to an agent (persistent check)
+            if (this.ledger.isDispatched(incoming.id)) {
+              continue;
+            }
+
+            // Skip if currently being executed by the runner
+            if (this.runner.isActive(incoming.id)) {
+              continue;
+            }
+
             const task: Task = {
               id: incoming.id,
               project: projectName,
@@ -140,7 +154,10 @@ export class Poller {
           )?.path ?? "",
         );
         const started = await this.runner.run(task, projectConfig);
-        if (!started) {
+        if (started) {
+          const ledgerType = task.type === "feedback" ? "comment" : "task";
+          this.ledger.markDispatched(task.id, ledgerType);
+        } else {
           this.queue.markFailed(task.id);
           logger.error({ taskId: task.id }, "Task failed to start, will not retry");
         }

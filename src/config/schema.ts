@@ -9,10 +9,26 @@ const NotificationChannelSchema = z.object({
 	}),
 });
 
+const DesktopNotificationSchema = z.object({
+	on: z.object({
+		taskCompleted: z.boolean().default(false),
+		taskFailed: z.boolean().default(false),
+		prCreated: z.boolean().default(false),
+	}),
+});
+
 const RemoteSchema = z.object({
 	host: z.string(),
 	port: z.number().default(7890),
 });
+
+const NotificationsSchema = z.object({
+	slack: NotificationChannelSchema.optional(),
+	discord: NotificationChannelSchema.optional(),
+	desktop: DesktopNotificationSchema.optional(),
+});
+
+export type Notifications = z.infer<typeof NotificationsSchema>;
 
 export const AgentName = z.enum(["claude-code", "codex", "aider", "opencode"]);
 
@@ -27,12 +43,7 @@ export const GlobalConfigSchema = z.object({
 	pollInterval: z.number().min(5).default(30),
 	maxConcurrent: z.number().min(1).default(2),
 	statusPort: z.number().default(7890),
-	notifications: z
-		.object({
-			slack: NotificationChannelSchema.optional(),
-			discord: NotificationChannelSchema.optional(),
-		})
-		.optional(),
+	notifications: NotificationsSchema.optional(),
 	remotes: z.record(z.string(), RemoteSchema).optional(),
 });
 
@@ -106,6 +117,7 @@ export const ProjectConfigSchema = z.object({
 	linear: LinearConfigSchema.optional(),
 	feedback: FeedbackConfigSchema.optional(),
 	slack: SlackProjectConfigSchema.optional(),
+	notifications: NotificationsSchema.optional(),
 });
 
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;

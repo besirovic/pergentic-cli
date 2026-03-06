@@ -5,7 +5,9 @@ import { createWorktree, ensureRepoClone, removeWorktree, type WorktreeInfo } fr
 import { commitAll, pushBranch, createPR, amendAndForcePush, pullBranch } from "./git";
 import { initHistory, addFeedbackRound, buildFeedbackPrompt, loadHistory } from "./feedback";
 import { notify, type TaskEvent } from "./notify";
+import { postTaskComments } from "./comments";
 import { recordTaskCost } from "./cost";
+import { recordEvent } from "./events";
 import { logger } from "../utils/logger";
 import type { Task } from "./queue";
 import type { GlobalConfig, ProjectConfig } from "../config/schema";
@@ -156,6 +158,14 @@ export class TaskRunner extends EventEmitter {
 
       this.emit("taskStarted", task);
 
+      recordEvent({
+        timestamp: new Date().toISOString(),
+        type: "taskStarted",
+        taskId: payload.taskId,
+        project: projectName,
+        title: payload.title,
+      });
+
       child.on("close", async (exitCode) => {
         const stderr = Buffer.concat(stderrChunks).toString("utf-8").trim();
         const stdout = Buffer.concat(stdoutChunks).toString("utf-8").trim();
@@ -191,7 +201,21 @@ export class TaskRunner extends EventEmitter {
                 githubToken: projectConfig.githubToken ?? "",
               });
 
-              recordTaskCost(payload.taskId, 0, duration, true, false);
+              recordTaskCost(payload.taskId, 0, duration, true, false, {
+                project: projectName,
+                title: payload.title,
+                prUrl: pr.url,
+              });
+
+              recordEvent({
+                timestamp: new Date().toISOString(),
+                type: "prCreated",
+                taskId: payload.taskId,
+                project: projectName,
+                title: payload.title,
+                duration,
+                prUrl: pr.url,
+              });
 
               const event: TaskEvent = {
                 type: "prCreated",
@@ -201,7 +225,18 @@ export class TaskRunner extends EventEmitter {
                 prUrl: pr.url,
                 duration,
               };
-              await notify(event, this.globalConfig);
+              await notify(event, this.globalConfig, projectConfig);
+
+              await postTaskComments({
+                worktreePath: worktree.path,
+                repo: projectConfig.repo,
+                prUrl: pr.url,
+                prNumber: pr.number,
+                taskTitle: payload.title,
+                taskId: payload.taskId,
+                projectConfig,
+                task,
+              });
             }
 
             this.emit("taskCompleted", task);
@@ -215,28 +250,71 @@ export class TaskRunner extends EventEmitter {
               { taskId: task.id, err, stderr: stderr.slice(-2000), stdout: stdout.slice(-2000) },
               "Post-agent steps failed",
             );
-            recordTaskCost(payload.taskId, 0, duration, false, true);
+            recordTaskCost(payload.taskId, 0, duration, false, true, {
+              project: projectName,
+              title: payload.title,
+              error: String(err),
+            });
+
+            recordEvent({
+              timestamp: new Date().toISOString(),
+              type: "taskFailed",
+              taskId: payload.taskId,
+              project: projectName,
+              title: payload.title,
+              duration,
+              error: String(err),
+            });
+
+            const event: TaskEvent = {
+              type: "taskFailed",
+              taskId: payload.taskId,
+              title: payload.title,
+              project: projectName,
+              error: String(err),
+              duration,
+            };
+            await notify(event, this.globalConfig, projectConfig);
           }
         } else {
-          recordTaskCost(payload.taskId, 0, duration, false, true);
+          const lastStderrSnippet = stderr.slice(-2000);
+          const lastStdoutSnippet = stdout.slice(-2000);
+          const errorDetail = lastStderrSnippet || lastStdoutSnippet || "No output captured";
 
-          // Build a useful error message from agent output
-          const lastStderr = stderr.slice(-2000);
-          const lastStdout = stdout.slice(-2000);
-          const errorDetail = lastStderr || lastStdout || "No output captured";
+          recordTaskCost(payload.taskId, 0, duration, false, true, {
+            project: projectName,
+            title: payload.title,
+            error: `Agent exited with code ${exitCode}: ${errorDetail.slice(0, 500)}`,
+          });
+
+          recordEvent({
+            timestamp: new Date().toISOString(),
+            type: "taskFailed",
+            taskId: payload.taskId,
+            project: projectName,
+            title: payload.title,
+            duration,
+            error: `Agent exited with code ${exitCode}: ${errorDetail.slice(0, 500)}`,
+          });
+
+          const errorJson = JSON.stringify(
+            { exitCode, detail: errorDetail.slice(0, 500) },
+            null,
+            2,
+          );
 
           const event: TaskEvent = {
             type: "taskFailed",
             taskId: payload.taskId,
             title: payload.title,
             project: projectName,
-            error: `Agent exited with code ${exitCode}: ${errorDetail.slice(0, 500)}`,
+            error: errorJson,
             duration,
           };
-          await notify(event, this.globalConfig);
+          await notify(event, this.globalConfig, projectConfig);
           this.emit("taskFailed", task, new Error(`Exit code: ${exitCode}`));
           logger.error(
-            { taskId: task.id, exitCode, duration, stderr: lastStderr, stdout: lastStdout },
+            { taskId: task.id, exitCode, duration, stderr: lastStderrSnippet, stdout: lastStdoutSnippet },
             "Task failed",
           );
         }
@@ -245,9 +323,24 @@ export class TaskRunner extends EventEmitter {
       return true;
     } catch (err) {
       logger.error({ taskId: task.id, err }, "Failed to start task");
+
+      const event: TaskEvent = {
+        type: "taskFailed",
+        taskId: payload.taskId,
+        title: payload.title,
+        project: projectName,
+        error: String(err),
+        duration: Math.floor((Date.now() - startTime) / 1000),
+      };
+      await notify(event, this.globalConfig, projectConfig);
+
       this.emit("taskFailed", task, err);
       return false;
     }
+  }
+
+  isActive(taskId: string): boolean {
+    return this.active.has(taskId);
   }
 
   cancelTask(taskId: string): boolean {

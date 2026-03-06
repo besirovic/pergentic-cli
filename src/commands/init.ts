@@ -10,6 +10,7 @@ import {
 	saveProjectsRegistry,
 	readRawGlobalConfig,
 	ensureGlobalConfigDir,
+	loadGlobalConfig,
 } from "../config/loader";
 import { projectConfigPath } from "../config/paths";
 import { ensureRepoClone } from "../core/worktree";
@@ -78,6 +79,20 @@ const menuCategories: ToolCategory[] = [
 		label: "Slack",
 		isConfigured: (c) => !!c.slackBotToken && !!c.slackAppToken,
 		configure: configureSlack,
+	},
+	{
+		id: "notifications",
+		label: "Notifications",
+		isConfigured: (c) => {
+			if (c.notifications?.slack?.webhook) return true;
+			try {
+				const g = loadGlobalConfig();
+				return !!g.notifications?.slack?.webhook;
+			} catch {
+				return false;
+			}
+		},
+		configure: configureNotifications,
 	},
 	{
 		id: "project-settings",
@@ -707,6 +722,47 @@ async function configureSlack(config: ProjectConfig): Promise<void> {
 		validate: (v) => (v.startsWith("xapp-") ? true : "Must start with xapp-"),
 		theme: promptTheme,
 	});
+}
+
+async function configureNotifications(config: ProjectConfig): Promise<void> {
+	const existingWebhook = config.notifications?.slack?.webhook
+		?? loadGlobalConfig().notifications?.slack?.webhook;
+
+	const webhook = await input({
+		message: "Slack webhook URL:",
+		default: existingWebhook,
+		validate: (v) =>
+			v.startsWith("https://hooks.slack.com/")
+				? true
+				: "Must start with https://hooks.slack.com/",
+		theme: promptTheme,
+	});
+
+	console.log();
+	const existingOn = config.notifications?.slack?.on;
+	const events = await checkbox<string>({
+		message: "Which events should send Slack notifications?",
+		choices: [
+			{ name: "PR Created", value: "prCreated", checked: existingOn?.prCreated ?? true },
+			{ name: "Task Failed", value: "taskFailed", checked: existingOn?.taskFailed ?? true },
+			{ name: "Task Completed", value: "taskCompleted", checked: existingOn?.taskCompleted ?? false },
+		],
+		theme: promptTheme,
+	});
+
+	if (!config.notifications) {
+		config.notifications = {};
+	}
+	config.notifications.slack = {
+		webhook,
+		on: {
+			prCreated: events.includes("prCreated"),
+			taskFailed: events.includes("taskFailed"),
+			taskCompleted: events.includes("taskCompleted"),
+		},
+	};
+
+	console.log(chalk.green("  Slack notifications configured.\n"));
 }
 
 async function configureProjectSettings(config: ProjectConfig): Promise<void> {

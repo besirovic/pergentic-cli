@@ -2,11 +2,16 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { statsFilePath } from "../config/paths";
 import { ensureGlobalConfigDir } from "../config/loader";
 
-interface TaskCostEntry {
+export interface TaskCostEntry {
   taskId: string;
   cost: number;
   duration: number;
   timestamp: string;
+  project?: string;
+  title?: string;
+  status?: "success" | "failed";
+  prUrl?: string;
+  error?: string;
 }
 
 interface DailyStats {
@@ -58,6 +63,7 @@ export function recordTaskCost(
   duration: number,
   createdPR: boolean,
   failed: boolean,
+  extra?: { project?: string; title?: string; prUrl?: string; error?: string },
 ): void {
   const stats = loadStats();
   const date = todayKey();
@@ -68,6 +74,8 @@ export function recordTaskCost(
     cost,
     duration,
     timestamp: new Date().toISOString(),
+    status: failed ? "failed" : "success",
+    ...extra,
   });
 
   day.tasks += 1;
@@ -89,4 +97,9 @@ export function getTaskStats(
 ): TaskCostEntry | undefined {
   const stats = loadStats();
   return stats.taskHistory.find((t) => t.taskId === taskId);
+}
+
+export function getTaskHistory(): TaskCostEntry[] {
+  const stats = loadStats();
+  return stats.taskHistory;
 }
