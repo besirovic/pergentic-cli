@@ -120,6 +120,11 @@ const VerificationConfigSchema = z.object({
 	maxRetries: z.number().min(0).max(20).default(3),
 });
 
+const AgentRetryConfigSchema = z.object({
+	maxRetries: z.number().min(0).max(10).default(0),
+	baseDelaySeconds: z.number().min(1).max(300).default(30),
+});
+
 const SlackProjectConfigSchema = z.object({
 	channels: z.record(z.string(), z.string()).optional(),
 });
@@ -182,6 +187,7 @@ export const ProjectConfigSchema = z.object({
 	linear: LinearConfigSchema.optional(),
 	feedback: FeedbackConfigSchema.optional(),
 	verification: VerificationConfigSchema.optional(),
+	agentRetry: AgentRetryConfigSchema.optional(),
 	branching: BranchConfigSchema.optional(),
 	slack: SlackProjectConfigSchema.optional(),
 	notifications: NotificationsSchema.optional(),

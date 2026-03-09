@@ -19,6 +19,7 @@ export interface LifecycleEvent {
 	cost?: number;
 	prUrl?: string;
 	error?: string;
+	retriesAttempted?: number;
 }
 
 export function recordEvent(event: LifecycleEvent): void {

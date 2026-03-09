@@ -13,6 +13,8 @@ import type { Task } from "./queue";
 import { AgentName } from "../config/schema";
 import type { GlobalConfig, ProjectConfig } from "../config/schema";
 import { buildBranchName, buildBranchTemplateVars, DEFAULT_BRANCH_TEMPLATE } from "./branch-name";
+import type { SpawnResult } from "../utils/process";
+import { cancellableSleep } from "../utils/sleep";
 import simpleGit from "simple-git";
 
 const MAX_ERROR_SNIPPET_CHARS = 2000;
@@ -42,6 +44,7 @@ interface ActiveTask {
   process: ChildProcess | null;
   worktree: WorktreeInfo;
   startTime: number;
+  abortController: AbortController;
 }
 
 export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
@@ -168,7 +171,8 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
         ...agentCmd.env,
       };
 
-      const activeTask: ActiveTask = { task, process: null, worktree, startTime };
+      const abortController = new AbortController();
+      const activeTask: ActiveTask = { task, process: null, worktree, startTime, abortController };
       this.active.set(task.id, activeTask);
 
       this.emit("taskStarted", task);
@@ -213,10 +217,60 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
     const timeoutMs = projectConfig.claude?.agentTimeout
       ? projectConfig.claude.agentTimeout * 1000
       : undefined;
-    const handle = spawnAgentAndWait(agentCmd, worktree.path, agentEnv, timeoutMs);
-    const activeEntry = this.active.get(task.id);
-    if (activeEntry) activeEntry.process = handle.process;
-    const result = await handle.result;
+
+    const agentRetryConfig = projectConfig.agentRetry;
+    const maxAgentRetries = agentRetryConfig?.maxRetries ?? 0;
+    const baseDelayMs = (agentRetryConfig?.baseDelaySeconds ?? 30) * 1000;
+    const signal = this.active.get(task.id)?.abortController.signal;
+
+    let result!: SpawnResult;
+    let lastAttempt = 0;
+
+    for (let attempt = 0; attempt <= maxAgentRetries; attempt++) {
+      lastAttempt = attempt;
+      // Backoff before retry (skip on first attempt)
+      if (attempt > 0) {
+        if (!this.active.has(task.id)) {
+          logger.info({ taskId: task.id, attempt }, "Task cancelled during agent retry backoff, aborting");
+          return;
+        }
+
+        const delayMs = baseDelayMs * Math.pow(2, attempt - 1) + Math.random() * 1000;
+        logger.info(
+          { taskId: task.id, attempt, maxRetries: maxAgentRetries, delayMs: Math.round(delayMs) },
+          "Retrying agent execution after failure",
+        );
+        await cancellableSleep(delayMs, signal);
+
+        // Re-check cancellation after sleep (may have been aborted early)
+        if (!this.active.has(task.id)) {
+          logger.info({ taskId: task.id, attempt }, "Task cancelled during agent retry backoff, aborting");
+          return;
+        }
+      }
+
+      const handle = spawnAgentAndWait(agentCmd, worktree.path, agentEnv, timeoutMs);
+      const activeEntry = this.active.get(task.id);
+      if (activeEntry) activeEntry.process = handle.process;
+      result = await handle.result;
+
+      // If task was cancelled during execution, do not retry
+      if (!this.active.has(task.id)) {
+        logger.info({ taskId: task.id }, "Task cancelled during agent execution");
+        return;
+      }
+
+      if (result.exitCode === 0) break;
+
+      if (attempt < maxAgentRetries) {
+        logger.warn(
+          { taskId: task.id, exitCode: result.exitCode, attempt: attempt + 1, maxRetries: maxAgentRetries,
+            stderr: result.stderr.slice(-500) },
+          "Agent execution failed, will retry",
+        );
+      }
+    }
+
     this.active.delete(task.id);
     const duration = Math.floor((Date.now() - startTime) / 1000);
 
@@ -293,7 +347,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       const errorDetail = lastStderrSnippet || lastStdoutSnippet || "No output captured";
       const errorMsg = `Agent exited with code ${result.exitCode}: ${errorDetail.slice(0, MAX_ERROR_DETAIL_CHARS)}`;
 
-      await this.lifecycle.recordFailure(ctx, duration, errorMsg, projectConfig);
+      await this.lifecycle.recordFailure(ctx, duration, errorMsg, projectConfig, lastAttempt > 0 ? lastAttempt : undefined);
       this.emit("taskFailed", task, new Error(`Exit code: ${result.exitCode}`));
       logger.error(
         { taskId: task.id, exitCode: result.exitCode, duration, stderr: lastStderrSnippet, stdout: lastStdoutSnippet },
@@ -386,6 +440,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
     const active = this.active.get(taskId);
     if (!active) return false;
 
+    active.abortController.abort();
     active.process?.kill("SIGTERM");
     this.active.delete(taskId);
     return true;
@@ -417,7 +472,8 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
     const { payload } = task;
     const command = "scheduledCommand" in payload ? payload.scheduledCommand! : "";
 
-    const activeTask: ActiveTask = { task, process: null, worktree, startTime };
+    const abortController = new AbortController();
+    const activeTask: ActiveTask = { task, process: null, worktree, startTime, abortController };
     this.active.set(task.id, activeTask);
     this.emit("taskStarted", task);
 
@@ -512,6 +568,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       const timer = setTimeout(() => {
         clearInterval(check);
         for (const [id, active] of this.active) {
+          active.abortController.abort();
           active.process?.kill("SIGKILL");
           this.active.delete(id);
         }

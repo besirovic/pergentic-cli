@@ -16,6 +16,7 @@ export interface TaskEvent {
 	duration?: number;
 	estimatedCost?: number;
 	error?: string;
+	retriesAttempted?: number;
 }
 
 function formatSlackMessage(event: TaskEvent): string {
@@ -42,11 +43,14 @@ function formatSlackMessage(event: TaskEvent): string {
 			return [
 				`❌ *${event.taskId}:* ${event.title}`,
 				`*Project:* ${event.project}`,
+				event.retriesAttempted
+					? `*Retries:* ${event.retriesAttempted} automatic retries attempted`
+					: "",
 				event.error
 					? `*Error:*\n\`\`\`${event.error}\`\`\``
 					: "*Error:* Unknown",
 				`Run \`pergentic retry ${event.taskId}\` to retry`,
-			].join("\n");
+			].filter(Boolean).join("\n");
 	}
 }
 
@@ -74,11 +78,14 @@ function formatDiscordMessage(event: TaskEvent): string {
 			return [
 				`**${event.taskId}:** ${event.title}`,
 				`**Project:** ${event.project}`,
+				event.retriesAttempted
+					? `**Retries:** ${event.retriesAttempted} automatic retries attempted`
+					: "",
 				event.error
 					? `**Error:**\n\`\`\`${event.error}\`\`\``
 					: "**Error:** Unknown",
 				`Run \`pergentic retry ${event.taskId}\` to retry`,
-			].join("\n");
+			].filter(Boolean).join("\n");
 	}
 }
 
@@ -91,11 +98,15 @@ function formatDesktopMessage(event: TaskEvent): { title: string; body: string }
 			if (event.duration) parts.push(formatDuration(event.duration));
 			return { title: "Task Completed", body: parts.join(" - ") };
 		}
-		case "taskFailed":
+		case "taskFailed": {
+			const retryInfo = event.retriesAttempted
+				? ` (${event.retriesAttempted} retries attempted)`
+				: "";
 			return {
 				title: "Task Failed",
-				body: `${event.taskId}: ${event.title}${event.error ? ` - ${event.error.slice(0, 200)}` : ""}`,
+				body: `${event.taskId}: ${event.title}${retryInfo}${event.error ? ` - ${event.error.slice(0, 200)}` : ""}`,
 			};
+		}
 	}
 }
 

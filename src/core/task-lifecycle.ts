@@ -64,6 +64,7 @@ export class TaskLifecycle {
     duration: number,
     error: string,
     projectConfig?: ProjectConfig,
+    retriesAttempted?: number,
   ): Promise<void> {
     recordTaskCost(ctx.taskId, 0, duration, false, true, {
       project: ctx.project,
@@ -79,6 +80,7 @@ export class TaskLifecycle {
       title: ctx.title,
       duration,
       error,
+      retriesAttempted,
     });
 
     const event: TaskEvent = {
@@ -88,6 +90,7 @@ export class TaskLifecycle {
       project: ctx.project,
       error,
       duration,
+      retriesAttempted,
     };
     await notify(event, this.globalConfig, projectConfig);
   }

@@ -651,6 +651,68 @@ async function wizardStepConfigureVerification(
 	);
 }
 
+// --- Wizard step: Configure agent execution retries ---
+
+async function wizardStepConfigureAgentRetry(
+	config: ProjectConfig,
+): Promise<void> {
+	console.log(chalk.bold("\n  Step 8: Agent Execution Retries\n"));
+	console.log(
+		chalk.dim("  If a coding agent crashes or exits with an error,")
+	);
+	console.log(
+		chalk.dim("  automatic retries can be attempted with exponential backoff.\n")
+	);
+
+	const existing = config.agentRetry;
+
+	const wantsRetry = await confirm({
+		message: "Enable automatic retry on agent failure?",
+		default: !!existing?.maxRetries,
+		theme: promptTheme,
+	});
+
+	if (!wantsRetry) {
+		config.agentRetry = undefined;
+		return;
+	}
+
+	const maxRetriesStr = await input({
+		message: "Max retry attempts:",
+		default: String(existing?.maxRetries ?? 2),
+		validate: (v) => {
+			const n = Number(v);
+			if (Number.isNaN(n) || !Number.isInteger(n) || n < 1 || n > 10) {
+				return "Must be an integer between 1 and 10";
+			}
+			return true;
+		},
+		theme: promptTheme,
+	});
+
+	const baseDelayStr = await input({
+		message: "Base delay between retries (seconds):",
+		default: String(existing?.baseDelaySeconds ?? 30),
+		validate: (v) => {
+			const n = Number(v);
+			if (Number.isNaN(n) || !Number.isInteger(n) || n < 1 || n > 300) {
+				return "Must be an integer between 1 and 300";
+			}
+			return true;
+		},
+		theme: promptTheme,
+	});
+
+	config.agentRetry = {
+		maxRetries: Number(maxRetriesStr),
+		baseDelaySeconds: Number(baseDelayStr),
+	};
+
+	console.log(
+		chalk.green(`\n  Agent retry configured: ${maxRetriesStr} retries, ${baseDelayStr}s base delay.\n`)
+	);
+}
+
 // --- Main init function ---
 
 export async function init(projectPath?: string): Promise<void> {
@@ -731,7 +793,10 @@ export async function init(projectPath?: string): Promise<void> {
 		// Step 7: Configure verification commands
 		await wizardStepConfigureVerification(config);
 
-		// --- Step 8: Remaining integrations (menu-based) ---
+		// Step 8: Configure agent execution retries
+		await wizardStepConfigureAgentRetry(config);
+
+		// --- Step 9: Remaining integrations (menu-based) ---
 		let continueMenu = true;
 		while (continueMenu) {
 			clearScreen();
@@ -836,6 +901,10 @@ export async function init(projectPath?: string): Promise<void> {
 	if (config.verification?.commands?.length) {
 		console.log(`  ${chalk.green("✓")} Verification: ${chalk.white(config.verification.commands.join(" → "))}`);
 		console.log(`  ${chalk.green("✓")} Max retries: ${chalk.white(String(config.verification.maxRetries))}`);
+	}
+
+	if (config.agentRetry?.maxRetries) {
+		console.log(`  ${chalk.green("✓")} Agent retry: ${chalk.white(`${config.agentRetry.maxRetries} retries, ${config.agentRetry.baseDelaySeconds}s base delay`)}`);
 	}
 
 	if (config.branching?.template && config.branching.template !== "{taskId}-{title}") {

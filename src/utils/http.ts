@@ -1,3 +1,5 @@
+import { sleep } from "./sleep";
+
 export class HttpError extends Error {
   status: number;
   statusText: string;
@@ -25,10 +27,6 @@ const DEFAULT_RETRY_CONFIG: RetryConfig = {
   baseDelayMs: 1000,
   retryableStatuses: [429, 500, 502, 503, 504],
 };
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 export async function fetchWithRetry(
   url: string,
