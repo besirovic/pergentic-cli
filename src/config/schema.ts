@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BRANCH_TEMPLATE_VARS } from "../core/branch-constants";
 
 const NotificationChannelSchema = z.object({
 	webhook: z.string().url(),
@@ -62,6 +63,29 @@ const PRConfigSchema = z.object({
 	bodyTemplate: z.string().optional(),
 	labels: z.array(z.string()).default(["ai-generated", "needs-review"]),
 	reviewers: z.array(z.string()).optional(),
+});
+
+const BranchConfigSchema = z.object({
+	template: z.string().default("{taskId}-{title}"),
+	typeMap: z.record(z.string(), z.array(z.string())).optional(),
+}).default({}).superRefine((val, ctx) => {
+	if (!val.template.includes("{taskId}")) {
+		ctx.addIssue({
+			code: z.ZodIssueCode.custom,
+			message: "Branch template must contain {taskId} to ensure unique branch names",
+			path: ["template"],
+		});
+	}
+
+	const usedVars = [...val.template.matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
+	const unknown = usedVars.filter((v) => !BRANCH_TEMPLATE_VARS.includes(v as typeof BRANCH_TEMPLATE_VARS[number]));
+	if (unknown.length > 0) {
+		ctx.addIssue({
+			code: z.ZodIssueCode.custom,
+			message: `Unknown branch template variables: ${unknown.join(", ")}. Valid: ${BRANCH_TEMPLATE_VARS.join(", ")}`,
+			path: ["template"],
+		});
+	}
 });
 
 const LinearConfigSchema = z.object({
@@ -158,11 +182,13 @@ export const ProjectConfigSchema = z.object({
 	linear: LinearConfigSchema.optional(),
 	feedback: FeedbackConfigSchema.optional(),
 	verification: VerificationConfigSchema.optional(),
+	branching: BranchConfigSchema.optional(),
 	slack: SlackProjectConfigSchema.optional(),
 	notifications: NotificationsSchema.optional(),
 });
 
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
+export type BranchConfig = z.infer<typeof BranchConfigSchema>;
 
 const ProjectEntrySchema = z.object({
 	path: z.string(),

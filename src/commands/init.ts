@@ -838,6 +838,10 @@ export async function init(projectPath?: string): Promise<void> {
 		console.log(`  ${chalk.green("✓")} Max retries: ${chalk.white(String(config.verification.maxRetries))}`);
 	}
 
+	if (config.branching?.template && config.branching.template !== "{taskId}-{title}") {
+		console.log(`  ${chalk.green("✓")} Branch template: ${chalk.white(config.branching.template)}`);
+	}
+
 	const configuredIntegrations = menuCategories.filter(
 		(c) => c.isConfigured(config) && c.id !== "project-settings"
 	);
@@ -1034,4 +1038,82 @@ async function configureProjectSettings(config: ProjectConfig): Promise<void> {
 		default: config.branch,
 		theme: promptTheme,
 	});
+
+	console.log();
+	const wantsBranchTemplate = await confirm({
+		message: "Configure branch naming template?",
+		default: false,
+		theme: promptTheme,
+	});
+
+	if (wantsBranchTemplate) {
+		console.log(chalk.dim("\n  Available variables:"));
+		console.log(chalk.dim("    {taskId}     - Provider task ID (e.g. LIN-123)"));
+		console.log(chalk.dim("    {title}      - Slugified task title"));
+		console.log(chalk.dim("    {source}     - Task origin (linear, github, slack, schedule)"));
+		console.log(chalk.dim("    {type}       - Conventional commit type from labels (feat, fix, chore, etc.)"));
+		console.log(chalk.dim("    {project}    - Project name"));
+		console.log(chalk.dim("    {agent}      - Coding agent name"));
+		console.log(chalk.dim("    {date}       - ISO date (YYYY-MM-DD)"));
+		console.log(chalk.dim("    {timestamp}  - Unix timestamp"));
+		console.log(chalk.dim("    {shortHash}  - 7-char hash of title"));
+		console.log(chalk.dim("  Template must contain {taskId} for uniqueness.\n"));
+
+		const template = await input({
+			message: "Branch template:",
+			default: config.branching?.template ?? "{taskId}-{title}",
+			validate: (v) => v.includes("{taskId}") ? true : "Must contain {taskId}",
+			theme: promptTheme,
+		});
+
+		if (!config.branching) {
+			config.branching = { template };
+		} else {
+			config.branching.template = template;
+		}
+
+		if (template.includes("{type}")) {
+			const wantsTypeMap = await confirm({
+				message: "Customize label-to-type mapping? (default maps 'bug'\u2192fix, 'feature'\u2192feat, etc.)",
+				default: false,
+				theme: promptTheme,
+			});
+
+			if (wantsTypeMap) {
+				const typeMap: Record<string, string[]> = { ...(config.branching?.typeMap ?? {}) };
+				let collecting = true;
+
+				if (Object.keys(typeMap).length > 0) {
+					console.log(chalk.dim(`  Existing: ${Object.entries(typeMap).map(([t, ls]) => `${t}\u2192${ls.join(",")}`).join("  ")}`));
+				}
+
+				while (collecting) {
+					const rawTypeName = await input({
+						message: "Conventional type (e.g. feat, fix, chore) or empty to finish:",
+						theme: promptTheme,
+					});
+
+					const typeName = rawTypeName.trim();
+					if (typeName === "") {
+						collecting = false;
+					} else {
+						const labelsStr = await input({
+							message: `Labels that map to "${typeName}" (comma-separated):`,
+							default: typeMap[typeName]?.join(", ") ?? "",
+							validate: (v) => v.trim().length > 0 ? true : "At least one label is required",
+							theme: promptTheme,
+						});
+
+						const labels = labelsStr.split(",").map((l) => l.trim()).filter(Boolean);
+						typeMap[typeName] = labels;
+						console.log(chalk.green(`  Added: ${typeName} \u2190 ${labels.join(", ")}`));
+					}
+				}
+
+				if (Object.keys(typeMap).length > 0) {
+					config.branching!.typeMap = typeMap;
+				}
+			}
+		}
+	}
 }

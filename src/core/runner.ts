@@ -12,6 +12,7 @@ import { TypedEventEmitter } from "../types/typed-emitter";
 import type { Task } from "./queue";
 import { AgentName } from "../config/schema";
 import type { GlobalConfig, ProjectConfig } from "../config/schema";
+import { buildBranchName, buildBranchTemplateVars, DEFAULT_BRANCH_TEMPLATE } from "./branch-name";
 import simpleGit from "simple-git";
 
 const MAX_ERROR_SNIPPET_CHARS = 2000;
@@ -75,19 +76,42 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
     try {
       await ensureRepoClone(projectName, projectConfig.repo, projectConfig.branch);
 
-      const worktreeTaskId = (task.type === "scheduled"
+      const isStandingBranch = task.type === "scheduled"
         && "schedulePrBehavior" in payload
         && payload.schedulePrBehavior === "update"
         && "schedulePrBranch" in payload
-        && payload.schedulePrBranch)
-          ? payload.schedulePrBranch
+        && !!payload.schedulePrBranch;
+
+      const worktreeTaskId = isStandingBranch
+          ? payload.schedulePrBranch!
           : payload.taskId;
+
+      // Resolve branch name from template (skip for standing branches and default template)
+      const rawAgentName = payload.targetAgents?.[0] ?? projectConfig.agent;
+      const parsedAgent = AgentName.catch("claude-code").parse(rawAgentName);
+      let resolvedBranchName: string | undefined;
+
+      const branchTemplate = projectConfig.branching?.template;
+      if (!isStandingBranch && branchTemplate && branchTemplate !== DEFAULT_BRANCH_TEMPLATE) {
+        const vars = buildBranchTemplateVars(branchTemplate, {
+          taskId: worktreeTaskId,
+          title: payload.title,
+          source: payload.source,
+          taskType: task.type,
+          project: projectName,
+          agent: parsedAgent,
+          labels: payload.labels ?? [],
+          typeMap: projectConfig.branching?.typeMap,
+        });
+        resolvedBranchName = buildBranchName(branchTemplate, vars);
+      }
 
       const worktree = await createWorktree(
         projectName,
         worktreeTaskId,
         payload.title,
         projectConfig.branch,
+        resolvedBranchName,
       );
 
       // Build prompt
@@ -118,8 +142,6 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       }
 
       // Resolve agent
-      const rawAgentName = payload.targetAgents?.[0] ?? projectConfig.agent;
-      const parsedAgent = AgentName.catch("claude-code").parse(rawAgentName);
       const agent = resolveAgent(parsedAgent);
       const allowedTools = projectConfig.agentTools?.[parsedAgent]
         ?? projectConfig.claude?.allowedTools;

@@ -50,18 +50,28 @@ export async function createWorktree(
   taskId: string,
   taskTitle: string,
   baseBranch: string,
+  branchNameOverride?: string,
 ): Promise<WorktreeInfo> {
   const repo = repoDir(projectName);
   const worktrees = worktreesDir(projectName);
 
   if (!existsSync(worktrees)) mkdirSync(worktrees, { recursive: true });
 
-  const branchName = `${taskId}-${slugify(taskTitle)}`;
+  const branchName = branchNameOverride ?? `${taskId}-${slugify(taskTitle)}`;
   const worktreePath = join(worktrees, taskId);
 
   if (existsSync(worktreePath)) {
-    logger.info({ taskId, path: worktreePath }, "Worktree already exists, reusing");
-    return { path: worktreePath, branch: branchName, taskId };
+    // Read actual branch from existing worktree instead of assuming current template
+    let existingBranch = branchName;
+    try {
+      const wtGit = simpleGit(worktreePath);
+      const rev = await wtGit.revparse(["--abbrev-ref", "HEAD"]);
+      if (rev.trim()) existingBranch = rev.trim();
+    } catch {
+      // Fall back to computed branch name
+    }
+    logger.info({ taskId, path: worktreePath, branch: existingBranch }, "Worktree already exists, reusing");
+    return { path: worktreePath, branch: existingBranch, taskId };
   }
 
   const git = simpleGit(repo);
