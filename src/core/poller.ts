@@ -210,12 +210,11 @@ export class Poller {
       if (!task) break;
 
       try {
-        const projectConfig = getCachedProjectConfig(
-          loadProjectsRegistry().projects.find(
-            (p) => basename(p.path) === task.project,
-          )?.path ?? "",
-        );
-        const started = await this.runner.run(task, projectConfig);
+        const projectPath = loadProjectsRegistry().projects.find(
+          (p) => basename(p.path) === task.project,
+        )?.path ?? "";
+        const projectConfig = getCachedProjectConfig(projectPath);
+        const started = await this.runner.run(task, projectConfig, projectPath);
         if (started) {
           const ledgerType = task.type === "feedback" ? "comment" : "task";
           this.ledger.markDispatched(task.id, ledgerType);

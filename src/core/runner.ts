@@ -13,6 +13,7 @@ import type { Task } from "./queue";
 import { AgentName } from "../config/schema";
 import type { GlobalConfig, ProjectConfig } from "../config/schema";
 import { buildBranchName, buildBranchTemplateVars, DEFAULT_BRANCH_TEMPLATE } from "./branch-name";
+import { buildPromptFromTemplate } from "./prompt-template";
 import type { SpawnResult } from "../utils/process";
 import { cancellableSleep } from "../utils/sleep";
 import simpleGit from "simple-git";
@@ -63,6 +64,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
   async run(
     task: Task,
     projectConfig: ProjectConfig,
+    projectPath: string,
   ): Promise<boolean> {
     if (this.active.size >= this.maxConcurrent) return false;
 
@@ -134,14 +136,13 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
         prompt = payload.description;
       } else {
         initHistory(worktree.path, payload.taskId, payload.description);
-        const contextParts: string[] = [];
-        if (projectConfig.claude?.systemContext) {
-          contextParts.push(projectConfig.claude.systemContext);
-        }
-        contextParts.push(
-          `Task: ${payload.title}\n\n${payload.description}`,
+        prompt = buildPromptFromTemplate(
+          projectPath,
+          task,
+          projectName,
+          projectConfig,
+          parsedAgent,
         );
-        prompt = contextParts.join("\n\n");
       }
 
       // Resolve agent

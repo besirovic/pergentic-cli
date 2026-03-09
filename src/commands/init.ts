@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { select, input, checkbox, confirm, Separator } from "@inquirer/prompts";
 import chalk from "chalk";
@@ -12,10 +12,11 @@ import {
 	ensureGlobalConfigDir,
 	loadGlobalConfig,
 } from "../config/loader";
-import { projectConfigPath } from "../config/paths";
+import { projectConfigPath, promptTemplatePath } from "../config/paths";
 import { ensureRepoClone } from "../core/worktree";
 import { resolveAgent } from "../agents/resolve-agent";
 import { extractSecrets, saveProjectEnv, migrateConfigSecrets } from "../config/env";
+import { DEFAULT_PROMPT_TEMPLATE } from "../core/prompt-template-constants";
 import type { ProjectConfig } from "../config/schema";
 
 type AgentNameType = ProjectConfig["configuredAgents"][number];
@@ -943,6 +944,16 @@ export async function init(projectPath?: string): Promise<void> {
 
 	// Save project config without secrets
 	saveProjectConfig(absPath, cleaned as unknown as ProjectConfig);
+
+	// Create default prompt template if it doesn't exist
+	const templateFilename = config.promptTemplate?.path ?? "PROMPT.md";
+	const templateFile = promptTemplatePath(absPath, templateFilename);
+	if (!existsSync(templateFile)) {
+		writeFileSync(templateFile, DEFAULT_PROMPT_TEMPLATE);
+		console.log(`  ${chalk.green("✓")} Prompt template created at ${chalk.dim(`.pergentic/${templateFilename}`)}`);
+	} else {
+		console.log(`  ${chalk.dim("○")} Prompt template already exists, skipping`);
+	}
 
 	// Register in projects registry
 	ensureGlobalConfigDir();

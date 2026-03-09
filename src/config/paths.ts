@@ -74,6 +74,10 @@ export function schedulesConfigPath(projectPath: string): string {
 	return join(projectPath, ".pergentic", "schedules.yaml");
 }
 
+export function promptTemplatePath(projectPath: string, filename = "PROMPT.md"): string {
+	return join(projectPath, ".pergentic", filename);
+}
+
 export function schedulesDir(projectPath: string): string {
 	return join(projectPath, ".pergentic", "schedules");
 }

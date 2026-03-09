@@ -129,6 +129,10 @@ const SlackProjectConfigSchema = z.object({
 	channels: z.record(z.string(), z.string()).optional(),
 });
 
+const PromptTemplateConfigSchema = z.object({
+	path: z.string().default("PROMPT.md"),
+});
+
 export const ScheduleType = z.enum(["prompt", "command"]);
 export const PRBehavior = z.enum(["new", "update"]);
 
@@ -189,6 +193,7 @@ export const ProjectConfigSchema = z.object({
 	verification: VerificationConfigSchema.optional(),
 	agentRetry: AgentRetryConfigSchema.optional(),
 	branching: BranchConfigSchema.optional(),
+	promptTemplate: PromptTemplateConfigSchema.optional(),
 	slack: SlackProjectConfigSchema.optional(),
 	notifications: NotificationsSchema.optional(),
 });
