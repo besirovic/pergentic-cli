@@ -1,9 +1,5 @@
 import { type ChildProcess } from "node:child_process";
-import { resolveAgent } from "../agents/resolve-agent";
-import { createWorktree, ensureRepoClone, type WorktreeInfo } from "./worktree";
-import { amendAndForcePush, pullBranch } from "./git";
-import { initHistory, addFeedbackRound, buildFeedbackPrompt, loadHistory } from "./feedback";
-import { TaskLifecycle, type TaskContext } from "./task-lifecycle";
+import type { WorktreeInfo } from "./worktree";
 import { logger } from "../utils/logger";
 import { TypedEventEmitter } from "../types/typed-emitter";
 import type { Task } from "./queue";
@@ -12,14 +8,11 @@ import type { GlobalConfig, ProjectConfig } from "../config/schema";
 import { buildBranchName, buildBranchTemplateVars, DEFAULT_BRANCH_TEMPLATE } from "./branch-name";
 import { buildPromptFromTemplate } from "./prompt-template";
 import type { SpawnResult } from "../utils/process";
-import { spawnAgentAndWait } from "./verify";
 import { cancellableSleep } from "../utils/sleep";
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { repoDir } from "../config/paths";
-import { VerificationRunner } from "./verification-runner";
-import { PRCreationService } from "./pr-service";
-import { ScheduledCommandRunner } from "./scheduled-runner";
+import { type RunnerDeps, createDefaultDeps } from "./runner-deps";
 
 const MAX_ERROR_SNIPPET_CHARS = 2000;
 const MAX_ERROR_DETAIL_CHARS = 500;
@@ -42,6 +35,8 @@ export interface RunnerEvents {
 export interface RunnerConfig {
   maxConcurrent: number;
   globalConfig: GlobalConfig;
+  /** Optional dependency overrides for testing. Defaults to real implementations. */
+  deps?: Partial<RunnerDeps>;
 }
 
 interface ActiveTask {
@@ -56,19 +51,14 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
   private active = new Map<string, ActiveTask>();
   private maxConcurrent: number;
   private globalConfig: GlobalConfig;
-  private lifecycle: TaskLifecycle;
-  private verificationRunner: VerificationRunner;
-  private prService: PRCreationService;
-  private scheduledRunner: ScheduledCommandRunner;
+  private deps: RunnerDeps;
 
   constructor(config: RunnerConfig) {
     super();
     this.maxConcurrent = config.maxConcurrent;
     this.globalConfig = config.globalConfig;
-    this.lifecycle = new TaskLifecycle(config.globalConfig);
-    this.prService = new PRCreationService();
-    this.verificationRunner = new VerificationRunner(this.lifecycle);
-    this.scheduledRunner = new ScheduledCommandRunner(this.lifecycle, this.prService);
+    const defaults = createDefaultDeps(config.globalConfig);
+    this.deps = { ...defaults, ...config.deps };
   }
 
   async run(
@@ -81,7 +71,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
     const projectName = task.project;
     const { payload } = task;
     const startTime = Date.now();
-    const ctx: TaskContext = { taskId: payload.taskId, title: payload.title, project: projectName };
+    const ctx = { taskId: payload.taskId, title: payload.title, project: projectName };
 
     logger.info(
       { taskId: task.id, project: projectName, type: task.type },
@@ -92,7 +82,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
     try {
       const cloneDir = repoDir(projectName);
       const repoExisted = existsSync(join(cloneDir, ".git")) || existsSync(join(cloneDir, "HEAD"));
-      await ensureRepoClone(projectName, projectConfig.repo, projectConfig.branch);
+      await this.deps.worktree.ensureRepoClone(projectName, projectConfig.repo, projectConfig.branch);
       freshClone = !repoExisted;
 
       const isStandingBranch = task.type === "scheduled"
@@ -125,7 +115,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
         resolvedBranchName = buildBranchName(branchTemplate, vars);
       }
 
-      const worktree = await createWorktree(
+      const worktree = await this.deps.worktree.createWorktree(
         projectName,
         worktreeTaskId,
         payload.title,
@@ -137,19 +127,19 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       let prompt: string;
 
       if (task.type === "feedback") {
-        await pullBranch(worktree.path, worktree.branch);
+        await this.deps.git.pullBranch(worktree.path, worktree.branch);
         const history =
-          (await loadHistory(worktree.path)) ??
-          (await initHistory(worktree.path, payload.taskId, payload.description));
+          (await this.deps.feedback.loadHistory(worktree.path)) ??
+          (await this.deps.feedback.initHistory(worktree.path, payload.taskId, payload.description));
         const comment = "comment" in payload ? payload.comment ?? "" : "";
-        await addFeedbackRound(worktree.path, comment);
-        prompt = buildFeedbackPrompt(history, comment);
+        await this.deps.feedback.addFeedbackRound(worktree.path, comment);
+        prompt = this.deps.feedback.buildFeedbackPrompt(history, comment);
       } else if (task.type === "scheduled" && "scheduledCommand" in payload && payload.scheduledCommand) {
         return this.runScheduledCommand(task, projectConfig, projectName, worktree, startTime);
       } else if (task.type === "scheduled" && !("scheduledCommand" in payload && payload.scheduledCommand)) {
         prompt = payload.description;
       } else {
-        await initHistory(worktree.path, payload.taskId, payload.description);
+        await this.deps.feedback.initHistory(worktree.path, payload.taskId, payload.description);
         prompt = await buildPromptFromTemplate({
           projectPath,
           task,
@@ -161,7 +151,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       }
 
       // Resolve agent
-      const agent = resolveAgent(parsedAgent);
+      const agent = this.deps.agentResolver.resolveAgent(parsedAgent);
       const allowedTools = projectConfig.agentTools?.[parsedAgent]
         ?? projectConfig.claude?.allowedTools;
 
@@ -192,7 +182,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       this.active.set(task.id, activeTask);
 
       this.emit("taskStarted", task);
-      await this.lifecycle.recordStart(ctx);
+      await this.deps.lifecycle.recordStart(ctx);
 
       this.executeTask(
         task, projectConfig, projectName, worktree, agentCmd, agentEnv,
@@ -223,7 +213,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       }
 
       const duration = Math.floor((Date.now() - startTime) / 1000);
-      await this.lifecycle.recordFailure(ctx, duration, String(err), projectConfig);
+      await this.deps.lifecycle.recordFailure(ctx, duration, String(err), projectConfig);
       this.emit("taskFailed", task, err);
       return false;
     }
@@ -234,7 +224,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
     projectConfig: ProjectConfig,
     projectName: string,
     worktree: WorktreeInfo,
-    agentCmd: ReturnType<ReturnType<typeof resolveAgent>["buildCommand"]>,
+    agentCmd: ReturnType<ReturnType<RunnerDeps["agentResolver"]["resolveAgent"]>["buildCommand"]>,
     agentEnv: Record<string, string | undefined>,
     agentOptions: {
       instructions?: string;
@@ -242,11 +232,11 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       maxCostPerTask?: number;
       model?: string;
     },
-    agent: ReturnType<typeof resolveAgent>,
+    agent: ReturnType<RunnerDeps["agentResolver"]["resolveAgent"]>,
     startTime: number,
   ): Promise<void> {
     const { payload } = task;
-    const ctx: TaskContext = { taskId: payload.taskId, title: payload.title, project: projectName };
+    const ctx = { taskId: payload.taskId, title: payload.title, project: projectName };
 
     const timeoutMs = projectConfig.claude?.agentTimeout
       ? projectConfig.claude.agentTimeout * 1000
@@ -283,7 +273,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
         }
       }
 
-      const handle = spawnAgentAndWait(agentCmd, worktree.path, agentEnv, timeoutMs);
+      const handle = this.deps.agentSpawner.spawnAgentAndWait(agentCmd, worktree.path, agentEnv, timeoutMs);
       const activeEntry = this.active.get(task.id);
       if (activeEntry) {
         activeEntry.process = handle.process;
@@ -316,14 +306,14 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
     if (result.exitCode === 0) {
       try {
         if (task.type === "feedback") {
-          await amendAndForcePush(worktree.path, worktree.branch);
+          await this.deps.git.amendAndForcePush(worktree.path, worktree.branch);
         } else {
           // Run verification commands for new tasks
           const verifyConfig = projectConfig.verification;
           const commands = verifyConfig?.commands ?? [];
 
           if (commands.length > 0) {
-            const verified = await this.verificationRunner.runVerificationLoop(
+            const verified = await this.deps.verification.runVerificationLoop(
               task, projectConfig, projectName, worktree, agentEnv,
               agentOptions, agent, duration, commands, verifyConfig?.maxRetries ?? 3,
               () => this.active.get(task.id),
@@ -336,9 +326,9 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
           }
 
           // Commit → push → PR
-          const pr = await this.prService.createPRFromWorktree(task, projectConfig, worktree);
+          const pr = await this.deps.prService.createPRFromWorktree(task, projectConfig, worktree);
 
-          await this.lifecycle.recordSuccess(ctx, duration, pr.url, projectConfig);
+          await this.deps.lifecycle.recordSuccess(ctx, duration, pr.url, projectConfig);
 
           this.emit("taskCompleted", task, {
             duration,
@@ -360,7 +350,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
           { taskId: task.id, err, stderr: result.stderr.slice(-MAX_ERROR_SNIPPET_CHARS), stdout: result.stdout.slice(-MAX_ERROR_SNIPPET_CHARS) },
           "Post-agent steps failed",
         );
-        await this.lifecycle.recordFailure(ctx, duration, String(err), projectConfig);
+        await this.deps.lifecycle.recordFailure(ctx, duration, String(err), projectConfig);
       }
     } else {
       const lastStderrSnippet = result.stderr.slice(-MAX_ERROR_SNIPPET_CHARS);
@@ -368,7 +358,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       const errorDetail = lastStderrSnippet || lastStdoutSnippet || "No output captured";
       const errorMsg = `Agent exited with code ${result.exitCode}: ${errorDetail.slice(0, MAX_ERROR_DETAIL_CHARS)}`;
 
-      await this.lifecycle.recordFailure(ctx, duration, errorMsg, projectConfig, lastAttempt > 0 ? lastAttempt : undefined);
+      await this.deps.lifecycle.recordFailure(ctx, duration, errorMsg, projectConfig, lastAttempt > 0 ? lastAttempt : undefined);
       this.emit("taskFailed", task, new Error(`Exit code: ${result.exitCode}`));
       logger.error(
         { taskId: task.id, exitCode: result.exitCode, duration, stderr: lastStderrSnippet, stdout: lastStdoutSnippet },
@@ -438,10 +428,10 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
     this.active.set(task.id, activeTask);
     this.emit("taskStarted", task);
 
-    const ctx: TaskContext = { taskId: payload.taskId, title: payload.title, project: projectName };
-    this.lifecycle.recordStart(ctx);
+    const ctx = { taskId: payload.taskId, title: payload.title, project: projectName };
+    this.deps.lifecycle.recordStart(ctx);
 
-    this.scheduledRunner.execute(
+    this.deps.scheduledRunner.execute(
       task, projectConfig, projectName, worktree, command, startTime,
     ).then((result) => {
       this.active.delete(task.id);
