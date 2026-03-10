@@ -10,23 +10,20 @@ const GitHubPRSchema = z.object({
 });
 const GitHubPRListSchema = z.array(GitHubPRSchema);
 
-export function parseOwnerRepo(repo: string): { owner: string; repo: string } {
-  // Handle SSH: git@github.com:owner/repo.git
-  const sshMatch = repo.match(/^git@github\.com:([^/]+)\/([^/.]+)/);
-  if (sshMatch) return { owner: sshMatch[1], repo: sshMatch[2] };
+export function parseOwnerRepo(repo: string): { owner: string; repo: string; hostname: string } {
+  // Handle SSH: git@<any-host>:owner/repo.git
+  const sshMatch = repo.match(/^git@([^:]+):([^/]+)\/([^/.]+)/);
+  if (sshMatch) return { owner: sshMatch[2], repo: sshMatch[3], hostname: sshMatch[1] };
 
-  // Handle HTTPS using URL class
+  // Handle HTTPS using URL class (supports github.com and GitHub Enterprise)
   try {
     const url = new URL(repo);
-    if (url.hostname !== "github.com") {
-      throw new Error(`Not a GitHub URL: ${repo}`);
-    }
     const segments = url.pathname.split("/").filter(Boolean);
     if (segments.length < 2) {
       throw new Error(`Cannot parse owner/repo from path: ${url.pathname}`);
     }
     const repoName = segments[1].replace(/\.git$/, "");
-    return { owner: segments[0], repo: repoName };
+    return { owner: segments[0], repo: repoName, hostname: url.hostname };
   } catch (err) {
     if (err instanceof TypeError) {
       // Not a valid URL — fall through
