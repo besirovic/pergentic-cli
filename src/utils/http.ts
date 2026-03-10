@@ -40,6 +40,21 @@ export interface RetryConfig {
 
 const RETRY_JITTER_MAX_MS = 500;
 
+/** Parse a Retry-After header value into milliseconds, or return undefined. */
+export function parseRetryAfterMs(value: string): number | undefined {
+  const seconds = parseInt(value, 10);
+  if (!Number.isNaN(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+  // Try HTTP-date format (e.g. "Wed, 21 Oct 2025 07:28:00 GMT")
+  const date = new Date(value);
+  if (!Number.isNaN(date.getTime())) {
+    const delta = date.getTime() - Date.now();
+    return Math.max(delta, 0);
+  }
+  return undefined;
+}
+
 const DEFAULT_RETRY_CONFIG: RetryConfig = {
   maxRetries: 3,
   baseDelayMs: 1000,
@@ -67,9 +82,9 @@ export async function fetchWithRetry(
         config.retryableStatuses.includes(response.status)
       ) {
         const retryAfter = response.headers.get("Retry-After");
-        const delayMs = retryAfter
-          ? parseInt(retryAfter, 10) * 1000
-          : config.baseDelayMs * Math.pow(2, attempt) + Math.random() * RETRY_JITTER_MAX_MS;
+        const parsed = retryAfter ? parseRetryAfterMs(retryAfter) : undefined;
+        const delayMs = parsed ??
+          config.baseDelayMs * Math.pow(2, attempt) + Math.random() * RETRY_JITTER_MAX_MS;
         await sleep(delayMs);
         continue;
       }
