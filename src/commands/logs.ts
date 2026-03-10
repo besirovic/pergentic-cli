@@ -66,7 +66,13 @@ export async function logs(opts: {
     const { spawn } = await import("node:child_process");
     const tail = spawn("tail", ["-f", logFile], { stdio: "pipe" });
 
-    const rl = createInterface({ input: tail.stdout! });
+    if (!tail.stdout) {
+      console.error("Failed to capture tail output stream.");
+      tail.kill();
+      return;
+    }
+
+    const rl = createInterface({ input: tail.stdout });
     rl.on("line", (line) => {
       if (opts.project) {
         try {
@@ -79,7 +85,8 @@ export async function logs(opts: {
       console.log(parseLogLine(line));
     });
 
-    process.on("SIGINT", () => {
+    process.once("SIGINT", () => {
+      rl.close();
       tail.kill();
       process.exit(0);
     });
