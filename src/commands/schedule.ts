@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { select, input } from "@inquirer/prompts";
 import chalk from "chalk";
+import { Cron } from "croner";
 import {
 	loadSchedulesConfig,
 	addScheduleEntry,
@@ -56,9 +57,7 @@ export async function scheduleAdd(projectPath: string): Promise<void> {
 			cron = await input({
 				message: "Cron expression (5 fields):",
 				validate: (v) => {
-					const parts = v.trim().split(/\s+/);
-					if (parts.length !== 5) return "Must be a 5-field cron expression";
-					return true;
+					try { new Cron(v.trim()); return true; } catch { return "Invalid cron expression"; }
 				},
 				theme: promptTheme,
 			});

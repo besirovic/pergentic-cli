@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Cron } from "croner";
 import { BRANCH_TEMPLATE_VARS } from "../core/branch-constants";
 
 const NotificationChannelSchema = z.object({
@@ -143,7 +144,9 @@ export const PRBehavior = z.enum(["new", "update"]);
 export const ScheduleEntrySchema = z.object({
 	id: z.string(),
 	name: z.string(),
-	cron: z.string(),
+	cron: z.string().refine((val) => {
+		try { new Cron(val); return true; } catch { return false; }
+	}, "Invalid cron expression"),
 	type: ScheduleType,
 	prompt: z.string().optional(),
 	agent: AgentName.optional(),
