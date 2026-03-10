@@ -1,3 +1,4 @@
+import chalk from "chalk";
 import { getTaskHistory, type TaskCostEntry } from "../core/cost";
 import { formatDuration } from "../utils/format";
 
@@ -39,7 +40,7 @@ async function detailView(taskId: string): Promise<void> {
 	const entries = (await getTaskHistory()).filter((e) => e.taskId === taskId);
 
 	if (entries.length === 0) {
-		console.error(`No history found for task "${taskId}".`);
+		console.error(`${chalk.red("Error:")} No history found for task "${taskId}".`);
 		process.exitCode = 1;
 		return;
 	}

@@ -736,13 +736,13 @@ export async function init(projectPath?: string): Promise<void> {
 	const absPath = resolve(projectPath ?? process.cwd());
 
 	if (!existsSync(absPath)) {
-		console.error(`Error: Directory does not exist: ${absPath}`);
+		console.error(`${chalk.red("Error:")} Directory does not exist: ${absPath}`);
 		process.exitCode = 1;
 		return;
 	}
 
 	if (!existsSync(resolve(absPath, ".git"))) {
-		console.error(`Error: Not a git repository: ${absPath}`);
+		console.error(`${chalk.red("Error:")} Not a git repository: ${absPath}`);
 		process.exitCode = 1;
 		return;
 	}

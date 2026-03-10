@@ -1,5 +1,6 @@
 import { resolve, basename } from "node:path";
 import { existsSync } from "node:fs";
+import chalk from "chalk";
 import {
 	loadProjectsRegistry,
 	saveProjectsRegistry,
@@ -13,7 +14,7 @@ import { validateProjectPath } from "../utils/project-validation";
 export async function add(projectPath: string): Promise<void> {
 	const validated = validateProjectPath(projectPath);
 	if (!validated.ok) {
-		console.error(`Error: ${validated.error}`);
+		console.error(`${chalk.red("Error:")} ${validated.error}`);
 		process.exitCode = 1;
 		return;
 	}

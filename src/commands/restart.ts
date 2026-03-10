@@ -1,3 +1,4 @@
+import chalk from "chalk";
 import { stop } from "./stop";
 import { forkDaemon } from "./start";
 
@@ -17,7 +18,7 @@ export async function restart(): Promise<void> {
     console.log(`   Logs: ${result.logFile}`);
     console.log(`   Stop: pergentic stop`);
   } else {
-    console.error("Failed to start daemon. It may already be running.");
+    console.error(`${chalk.red("Error:")} Failed to start daemon. It may already be running.`);
     process.exitCode = 1;
   }
 }

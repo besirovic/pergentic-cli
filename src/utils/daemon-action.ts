@@ -1,3 +1,4 @@
+import chalk from "chalk";
 import { daemonRequest } from "./daemon-client";
 
 export async function daemonAction(
@@ -9,7 +10,7 @@ export async function daemonAction(
   if (result.ok) {
     console.log(`${successMessage}: ${taskId}`);
   } else {
-    console.error(result.body);
+    console.error(`${chalk.red("Error:")} ${result.body}`);
     process.exitCode = 1;
   }
 }

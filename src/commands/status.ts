@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import chalk from "chalk";
 import { isRunning, readPid } from "../utils/health";
 import { loadGlobalConfig } from "../config/loader";
 import { readState, type DaemonState } from "../utils/daemon-state";
@@ -15,7 +16,7 @@ async function fetchRemoteStatus(remoteName: string): Promise<void> {
 	const config = loadGlobalConfig();
 	const remote = config.remotes?.[remoteName];
 	if (!remote) {
-		console.error(`Remote "${remoteName}" not found in config.`);
+		console.error(`${chalk.red("Error:")} Remote "${remoteName}" not found in config.`);
 		process.exitCode = 1;
 		return;
 	}
@@ -38,7 +39,7 @@ async function fetchRemoteStatus(remoteName: string): Promise<void> {
 		const state = (await res.json()) as DaemonState;
 		renderStatus(state, remoteName);
 	} catch {
-		console.error(`Failed to connect to remote "${remoteName}".`);
+		console.error(`${chalk.red("Error:")} Failed to connect to remote "${remoteName}".`);
 		process.exitCode = 1;
 	} finally {
 		tunnel.kill();

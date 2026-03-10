@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
+import chalk from "chalk";
 import { daemonLogPath } from "../config/paths";
 
 function parseLogLine(line: string): string {
@@ -67,8 +68,9 @@ export async function logs(opts: {
     const tail = spawn("tail", ["-f", logFile], { stdio: "pipe" });
 
     if (!tail.stdout) {
-      console.error("Failed to capture tail output stream.");
+      console.error(`${chalk.red("Error:")} Failed to capture tail output stream.`);
       tail.kill();
+      process.exitCode = 1;
       return;
     }
 
