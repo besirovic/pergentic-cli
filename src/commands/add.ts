@@ -31,7 +31,7 @@ export async function add(projectPath: string): Promise<void> {
 	// If no project config exists, delegate to init wizard
 	const configFile = projectConfigPath(absPath);
 	if (!existsSync(configFile)) {
-		const { init } = await import("./init.js");
+		const { init } = await import("./init/index.js");
 		await init(absPath);
 		return;
 	}

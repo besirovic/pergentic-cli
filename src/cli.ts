@@ -33,7 +33,7 @@ export function createProgram(): Command {
 		.description("Interactive project setup wizard")
 		.argument("[path]", "Project directory path", process.cwd())
 		.action(handleCommand(async (projectPath: string) => {
-			const { init } = await import("./commands/init.js");
+			const { init } = await import("./commands/init/index.js");
 			await init(projectPath);
 		}));
 
