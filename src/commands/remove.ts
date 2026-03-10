@@ -4,6 +4,7 @@ import {
   loadProjectsRegistry,
   saveProjectsRegistry,
 } from "../config/loader";
+import { promptTheme } from "../utils/prompt-helpers";
 
 export async function remove(projectPath: string): Promise<void> {
   const absPath = resolve(projectPath);
@@ -21,6 +22,7 @@ export async function remove(projectPath: string): Promise<void> {
   const ok = await confirm({
     message: `Remove project ${absPath}?`,
     default: false,
+    theme: promptTheme,
   });
 
   if (!ok) {
