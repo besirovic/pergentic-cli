@@ -18,6 +18,9 @@ import { readAgentPRBody } from "./pr-template";
 import type { SpawnResult } from "../utils/process";
 import { cancellableSleep } from "../utils/sleep";
 import simpleGit from "simple-git";
+import { existsSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { repoDir } from "../config/paths";
 
 const MAX_ERROR_SNIPPET_CHARS = 2000;
 const MAX_ERROR_DETAIL_CHARS = 500;
@@ -80,8 +83,12 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       "Starting task",
     );
 
+    let freshClone = false;
     try {
+      const cloneDir = repoDir(projectName);
+      const repoExisted = existsSync(join(cloneDir, ".git")) || existsSync(join(cloneDir, "HEAD"));
       await ensureRepoClone(projectName, projectConfig.repo, projectConfig.branch);
+      freshClone = !repoExisted;
 
       const isStandingBranch = task.type === "scheduled"
         && "schedulePrBehavior" in payload
@@ -198,6 +205,18 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       return true;
     } catch (err) {
       logger.error({ taskId: task.id, err }, "Failed to start task");
+
+      // Clean up freshly cloned repo if worktree creation (or later setup) failed
+      if (freshClone) {
+        const cloneDir = repoDir(projectName);
+        try {
+          rmSync(cloneDir, { recursive: true, force: true });
+          logger.info({ taskId: task.id, path: cloneDir }, "Cleaned up freshly cloned repo after failure");
+        } catch (cleanupErr) {
+          logger.warn({ taskId: task.id, err: cleanupErr, path: cloneDir }, "Failed to clean up cloned repo");
+        }
+      }
+
       const duration = Math.floor((Date.now() - startTime) / 1000);
       await this.lifecycle.recordFailure(ctx, duration, String(err), projectConfig);
       this.emit("taskFailed", task, err);
