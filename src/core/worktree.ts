@@ -17,6 +17,11 @@ export function slugify(text: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
 
+  if (!slug) {
+    const hash = createHash("md5").update(text).digest("hex").slice(0, 7);
+    return `task-${hash}`;
+  }
+
   if (slug.length <= 50) return slug;
 
   // Add hash suffix to prevent collisions when truncating

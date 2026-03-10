@@ -69,13 +69,20 @@ export function buildBranchName(template: string, vars: BranchTemplateVars): str
     return vars[varName as keyof BranchTemplateVars];
   });
 
-  return result
+  const sanitized = result
     .replace(/[\s~^:?*\[\]\\]+/g, "-")
     .replace(/\.{2,}/g, ".")
     .replace(/[-]+/g, "-")
     .replace(/[/]+/g, "/")
     .replace(/^[-./]+|[-./]+$/g, "")
     .replace(/\.lock$/, "");
+
+  if (!sanitized) {
+    const hash = createHash("md5").update(template + JSON.stringify(vars)).digest("hex").slice(0, 7);
+    return `branch-${hash}`;
+  }
+
+  return sanitized;
 }
 
 export function buildBranchTemplateVars(

@@ -33,6 +33,16 @@ describe("slugify", () => {
 		expect(result).toMatch(/^.{42}-[a-f0-9]{7}$/);
 	});
 
+	it("returns hash-based fallback for all-special-character input", () => {
+		const result = slugify("!!!");
+		expect(result).toMatch(/^task-[a-f0-9]{7}$/);
+	});
+
+	it("returns hash-based fallback for empty string", () => {
+		const result = slugify("");
+		expect(result).toMatch(/^task-[a-f0-9]{7}$/);
+	});
+
 	it("produces different slugs for similar long strings", () => {
 		const a = "a".repeat(60) + "-variant-one";
 		const b = "a".repeat(60) + "-variant-two";
