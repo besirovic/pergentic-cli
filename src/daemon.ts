@@ -14,9 +14,10 @@ import { acquireLock, releaseLock } from "./utils/health";
 import { pruneStats, STATS_RETENTION_DAYS } from "./core/cost";
 import { pruneEvents, MAX_EVENT_ENTRIES } from "./core/events";
 import { createDaemonServer } from "./utils/daemon-server";
-import { TaskSource } from "./config/schema";
+import { TaskSource, type ProjectConfig } from "./config/schema";
 import { z } from "zod";
 import type { Task, ScheduledPayload } from "./core/queue";
+import type { TaskProvider } from "./providers/types";
 
 const logger = createLogger("daemon");
 
@@ -33,6 +34,31 @@ const CancelRequestSchema = z.object({
 const STATE_UPDATE_INTERVAL_MS = 3000;
 const SHUTDOWN_TIMEOUT_MS = 300_000;
 let shuttingDown = false;
+
+async function createProviderForSource(
+	source: string,
+	projectConfig: ProjectConfig,
+): Promise<TaskProvider | null> {
+	switch (source) {
+		case "linear":
+			if (projectConfig.linearApiKey) {
+				const { LinearProvider } = await import("./providers/linear.js");
+				return new LinearProvider(projectConfig.linearApiKey);
+			}
+			return null;
+		case "github":
+			if (projectConfig.githubToken) {
+				const { GitHubProvider } = await import("./providers/github.js");
+				return new GitHubProvider(projectConfig.githubToken);
+			}
+			return null;
+		case "jira":
+			// TODO: Add JiraProvider once the provider class is implemented
+			return null;
+		default:
+			return null;
+	}
+}
 
 async function main(): Promise<void> {
 	ensureGlobalConfigDir();
@@ -85,27 +111,21 @@ async function main(): Promise<void> {
 
 		// Call provider onComplete to update ticket status
 		if (meta?.projectConfig && task.payload.source) {
-			const projectConfig = meta.projectConfig;
-			const providers: import("./providers/types").TaskProvider[] = [];
+			const provider = await createProviderForSource(task.payload.source, meta.projectConfig);
 
-			if (task.payload.source === "linear" && projectConfig.linearApiKey) {
-				const { LinearProvider } = await import("./providers/linear.js");
-				providers.push(new LinearProvider(projectConfig.linearApiKey));
-			}
+			if (provider) {
+				const projectEntry = loadProjectsRegistry().projects.find(
+					(p) => basename(p.path) === task.project,
+				);
+				const context: import("./providers/types").ProjectContext = {
+					name: task.project,
+					path: projectEntry?.path ?? "",
+					repo: meta.projectConfig.repo,
+					branch: meta.projectConfig.branch,
+					agent: meta.projectConfig.agent,
+					linearTeamId: meta.projectConfig.linearTeamId,
+				};
 
-			const projectEntry = loadProjectsRegistry().projects.find(
-				(p) => basename(p.path) === task.project,
-			);
-			const context: import("./providers/types").ProjectContext = {
-				name: task.project,
-				path: projectEntry?.path ?? "",
-				repo: projectConfig.repo,
-				branch: projectConfig.branch,
-				agent: projectConfig.agent,
-				linearTeamId: projectConfig.linearTeamId,
-			};
-
-			for (const provider of providers) {
 				try {
 					await provider.onComplete(context, task.payload.taskId, {
 						taskId: task.payload.taskId,
