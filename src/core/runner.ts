@@ -7,7 +7,7 @@ import { AgentName } from "../config/schema";
 import type { GlobalConfig, ProjectConfig } from "../config/schema";
 import { buildBranchName, buildBranchTemplateVars, DEFAULT_BRANCH_TEMPLATE } from "./branch-name";
 import { buildPromptFromTemplate } from "./prompt-template";
-import type { SpawnResult } from "../utils/process";
+import { type SpawnResult, SIGKILL_DELAY_MS } from "../utils/process";
 import { cancellableSleep } from "../utils/sleep";
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -16,7 +16,6 @@ import { type RunnerDeps, createDefaultDeps } from "./runner-deps";
 
 const MAX_ERROR_SNIPPET_CHARS = 2000;
 const MAX_ERROR_DETAIL_CHARS = 500;
-const SIGKILL_DELAY_MS = 10_000;
 const AGENT_RETRY_JITTER_MAX_MS = 1000;
 const ERROR_LOG_SNIPPET_CHARS = 500;
 const PROCESS_CHECK_INTERVAL_MS = 1000;
@@ -191,11 +190,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
         task, projectConfig, projectName, worktree, agentCmd, agentEnv,
         agentOptions, agent, startTime,
       ).catch((err) => {
-        try {
-          logger.error({ taskId: task.id, err }, "Unhandled error in task execution");
-        } catch {
-          console.error("Failed to log task execution error:", err);
-        }
+        logger.error({ taskId: task.id, err }, "Unhandled error in task execution");
         this.active.delete(task.id);
         this.emit("taskFailed", task, err);
       });
@@ -432,7 +427,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
     this.emit("taskStarted", task);
 
     const ctx = { taskId: payload.taskId, title: payload.title, project: projectName };
-    this.deps.lifecycle.recordStart(ctx);
+    await this.deps.lifecycle.recordStart(ctx);
 
     this.deps.scheduledRunner.execute(
       task, projectConfig, projectName, worktree, command, startTime,
@@ -444,11 +439,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
         this.emit("taskFailed", task, new Error("Scheduled command failed"));
       }
     }).catch((err) => {
-      try {
-        logger.error({ taskId: task.id, err }, "Unhandled error in scheduled command execution");
-      } catch {
-        console.error("Failed to log scheduled command execution error:", err);
-      }
+      logger.error({ taskId: task.id, err }, "Unhandled error in scheduled command execution");
       this.active.delete(task.id);
       this.emit("taskFailed", task, err);
     });

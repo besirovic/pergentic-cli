@@ -1,5 +1,5 @@
-import chalk from "chalk";
 import { daemonRequest } from "./daemon-client";
+import { error } from "./ui";
 
 export async function daemonAction(
   endpoint: string,
@@ -10,7 +10,6 @@ export async function daemonAction(
   if (result.ok) {
     console.log(`${successMessage}: ${taskId}`);
   } else {
-    console.error(`${chalk.red("Error:")} ${result.body}`);
-    process.exitCode = 1;
+    error(result.body);
   }
 }

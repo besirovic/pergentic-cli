@@ -123,6 +123,7 @@ const FeedbackConfigSchema = z.object({
 });
 
 const VerificationConfigSchema = z.object({
+	/** Shell commands executed via `sh -c` after the agent completes. */
 	commands: z.array(z.string()).default([]),
 	maxRetries: z.number().min(0).max(20).default(3),
 });
@@ -155,6 +156,7 @@ export const ScheduleEntrySchema = z.object({
 	type: ScheduleType,
 	prompt: z.string().optional(),
 	agent: AgentName.optional(),
+	/** Shell command executed via `sh -c` in the worktree. */
 	command: z.string().optional(),
 	branch: z.string().default("main"),
 	prBehavior: PRBehavior.default("new"),

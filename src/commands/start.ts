@@ -3,6 +3,7 @@ import { openSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isRunning, writePid } from "../utils/health";
+import { success } from "../utils/ui";
 import { daemonLogPath, globalConfigDir } from "../config/paths";
 import { ensureGlobalConfigDir } from "../config/loader";
 
@@ -45,7 +46,7 @@ export async function start(): Promise<void> {
 
 	const result = forkDaemon();
 	if (result) {
-		console.log(`🚀 Pergentic running in background (PID: ${result.pid})`);
+		success(`Pergentic running in background (PID: ${result.pid})`);
 		console.log(`   Logs: ${result.logFile}`);
 		console.log(`   Stop: pergentic stop`);
 	}

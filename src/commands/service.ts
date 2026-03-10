@@ -1,6 +1,7 @@
 import { writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir, platform } from "node:os";
+import { success } from "../utils/ui";
 
 function generateSystemdUnit(): string {
 	const nodePath = process.execPath;
@@ -66,7 +67,7 @@ export async function serviceInstall(): Promise<void> {
 		const dir = dirname(unitPath);
 		if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 		writeFileSync(unitPath, generateSystemdUnit());
-		console.log(`✅ Created ${unitPath}`);
+		success(`Created ${unitPath}`);
 		console.log("   Enable with: systemctl --user enable pergentic");
 		console.log("   Start with:  systemctl --user start pergentic");
 	} else if (os === "darwin") {
@@ -79,7 +80,7 @@ export async function serviceInstall(): Promise<void> {
 		const dir = dirname(plistPath);
 		if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 		writeFileSync(plistPath, generateLaunchdPlist());
-		console.log(`✅ Created ${plistPath}`);
+		success(`Created ${plistPath}`);
 		console.log("   Load with: launchctl load " + plistPath);
 	} else {
 		console.log(`Service installation not supported on ${os}.`);

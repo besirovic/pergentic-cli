@@ -26,7 +26,7 @@ export class PRCreationService {
     await commitAll(worktree.path, prDetails.commitMessage);
     await pushBranch(worktree.path, worktree.branch);
 
-    const pr = await createPR(worktree.path, {
+    const pr = await createPR({
       repo: projectConfig.repo,
       branch: worktree.branch,
       baseBranch: projectConfig.branch,

@@ -47,8 +47,11 @@ export function acquireLock(): boolean {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       const fd = openSync(lockFile, "wx");
-      writeFileSync(fd, String(process.pid), "utf-8");
-      closeSync(fd);
+      try {
+        writeFileSync(fd, String(process.pid), "utf-8");
+      } finally {
+        closeSync(fd);
+      }
       return true;
     } catch (err: unknown) {
       const code = (err as NodeJS.ErrnoException).code;

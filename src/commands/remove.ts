@@ -5,6 +5,7 @@ import {
   saveProjectsRegistry,
 } from "../config/loader";
 import { promptTheme } from "../utils/prompt-helpers";
+import { success } from "../utils/ui";
 
 export async function remove(projectPath: string): Promise<void> {
   const absPath = resolve(projectPath);
@@ -32,5 +33,5 @@ export async function remove(projectPath: string): Promise<void> {
 
   registry.projects.splice(idx, 1);
   saveProjectsRegistry(registry);
-  console.log(`✅ Removed project: ${absPath}`);
+  success(`Removed project: ${absPath}`);
 }

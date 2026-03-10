@@ -1,7 +1,9 @@
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { existsSync, writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { select, input, checkbox, confirm, Separator } from "@inquirer/prompts";
+// chalk is used for complex multi-color output in the init wizard.
+// Simple status messages (error/warn/success) use ../utils/ui.
 import chalk from "chalk";
 import {
 	loadProjectConfig,
@@ -139,6 +141,7 @@ function formatChoice(cat: ToolCategory, config: ProjectConfig): string {
 }
 
 import { promptTheme, isExitPromptError } from "../utils/prompt-helpers";
+import { error } from "../utils/ui";
 
 function detectGitRemote(projectPath: string): string | undefined {
 	try {
@@ -304,8 +307,7 @@ async function wizardStep3ConfigureKeys(
 			// Fixed-provider agent (claude-code → anthropic, codex → openai)
 			const providerDef = PROVIDERS.find((p) => p.value === fixedProvider);
 			if (!providerDef) {
-				console.error(`Unknown provider: ${fixedProvider}`);
-				process.exitCode = 1;
+				error(`Unknown provider: ${fixedProvider}`);
 				return;
 			}
 			config.agentProviders[agent] = fixedProvider;
@@ -328,8 +330,7 @@ async function wizardStep3ConfigureKeys(
 
 			const providerDef = PROVIDERS.find((p) => p.value === provider);
 			if (!providerDef) {
-				console.error(`Unknown provider: ${provider}`);
-				process.exitCode = 1;
+				error(`Unknown provider: ${provider}`);
 				return;
 			}
 			if (providerDef.keyField) {
@@ -736,14 +737,12 @@ export async function init(projectPath?: string): Promise<void> {
 	const absPath = resolve(projectPath ?? process.cwd());
 
 	if (!existsSync(absPath)) {
-		console.error(`${chalk.red("Error:")} Directory does not exist: ${absPath}`);
-		process.exitCode = 1;
+		error(`Directory does not exist: ${absPath}`);
 		return;
 	}
 
 	if (!existsSync(resolve(absPath, ".git"))) {
-		console.error(`${chalk.red("Error:")} Not a git repository: ${absPath}`);
-		process.exitCode = 1;
+		error(`Not a git repository: ${absPath}`);
 		return;
 	}
 
@@ -981,7 +980,7 @@ export async function init(projectPath?: string): Promise<void> {
 
 	// Clone repo into workspaces dir for worktree-based task execution
 	if (config.repo) {
-		const projectName = absPath.split("/").pop() ?? "project";
+		const projectName = basename(absPath) || "project";
 		try {
 			console.log(`  ${chalk.dim("Cloning repo for task execution...")}`);
 			await ensureRepoClone(projectName, config.repo, config.branch);

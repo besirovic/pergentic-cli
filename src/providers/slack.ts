@@ -66,38 +66,31 @@ export class SlackProvider implements TaskProvider {
 		this.pendingTasks = [];
 
 		const ws = new WebSocket(data.url);
-
-		try {
-			ws.onmessage = (event) => {
-				try {
-					const payload = JSON.parse(String(event.data));
-					this.handleEvent(payload, currentConnectionId);
-				} catch (err) {
-					logger.error({ err }, "Failed to parse Slack event");
-				}
-			};
-
-			ws.onerror = (err) => {
-				logger.error({ err }, "Slack WebSocket error");
-			};
-
-			ws.onclose = () => {
-				logger.info(
-					"Slack WebSocket closed, will reconnect on next poll"
-				);
-				if (this.connectionId === currentConnectionId) {
-					this.ws = null;
-					this.connectionState = "disconnected";
-				}
-			};
-		} catch (err) {
-			ws.close();
-			this.connectionState = "disconnected";
-			throw err;
-		}
-
 		this.ws = ws;
 		this.connectionState = "connected";
+
+		ws.onmessage = (event) => {
+			try {
+				const payload = JSON.parse(String(event.data));
+				this.handleEvent(payload, currentConnectionId);
+			} catch (err) {
+				logger.error({ err }, "Failed to parse Slack event");
+			}
+		};
+
+		ws.onerror = (err) => {
+			logger.error({ err }, "Slack WebSocket error");
+		};
+
+		ws.onclose = () => {
+			logger.info(
+				"Slack WebSocket closed, will reconnect on next poll"
+			);
+			if (this.connectionId === currentConnectionId) {
+				this.ws = null;
+				this.connectionState = "disconnected";
+			}
+		};
 	}
 
 	private handleEvent(
@@ -175,9 +168,7 @@ export class SlackProvider implements TaskProvider {
 		_taskId: string,
 		result: TaskResult
 	): Promise<void> {
-		// Reply in thread
-		// This would need the channel and thread_ts from metadata
-		// For now, just log it
+		// TODO: Reply in Slack thread with task result using metadata.channel and metadata.threadTs
 		logger.info(
 			{ taskId: _taskId, status: result.status },
 			"Slack task complete"
@@ -190,5 +181,6 @@ export class SlackProvider implements TaskProvider {
 			this.ws = null;
 		}
 		this.connectionState = "disconnected";
+		this.connectionId = 0;
 	}
 }

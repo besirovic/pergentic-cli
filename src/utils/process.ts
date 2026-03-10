@@ -1,5 +1,8 @@
 import { spawn, type SpawnOptions } from "node:child_process";
 
+/** Delay between SIGTERM and SIGKILL when killing agent processes. */
+export const SIGKILL_DELAY_MS = 10_000;
+
 export interface SpawnResult {
   exitCode: number;
   stdout: string;

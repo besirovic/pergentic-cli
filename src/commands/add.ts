@@ -1,6 +1,5 @@
 import { resolve, basename } from "node:path";
 import { existsSync } from "node:fs";
-import chalk from "chalk";
 import {
 	loadProjectsRegistry,
 	saveProjectsRegistry,
@@ -10,12 +9,12 @@ import {
 import { projectConfigPath } from "../config/paths";
 import { ensureRepoClone } from "../core/worktree";
 import { validateProjectPath } from "../utils/project-validation";
+import { error, warn, success } from "../utils/ui";
 
 export async function add(projectPath: string): Promise<void> {
 	const validated = validateProjectPath(projectPath);
 	if (!validated.ok) {
-		console.error(`${chalk.red("Error:")} ${validated.error}`);
-		process.exitCode = 1;
+		error(validated.error);
 		return;
 	}
 	const absPath = validated.value;
@@ -48,11 +47,9 @@ export async function add(projectPath: string): Promise<void> {
 		try {
 			await ensureRepoClone(projectName, config.repo, config.branch);
 		} catch (err) {
-			console.log(
-				`⚠️  Failed to clone repo: ${err instanceof Error ? err.message : err}`,
-			);
+			warn(`Failed to clone repo: ${err instanceof Error ? err.message : err}`);
 		}
 	}
 
-	console.log(`✅ Registered project: ${absPath}`);
+	success(`Registered project: ${absPath}`);
 }

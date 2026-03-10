@@ -1,7 +1,14 @@
 import simpleGit from "simple-git";
+import { z } from "zod";
 import { logger } from "../utils/logger";
 import { fetchWithRetry } from "../utils/http";
 import { PR_BODY_OUTPUT_FILE } from "./pr-template";
+
+const GitHubPRSchema = z.object({
+  html_url: z.string(),
+  number: z.number(),
+});
+const GitHubPRListSchema = z.array(GitHubPRSchema);
 
 export function parseOwnerRepo(repo: string): { owner: string; repo: string } {
   // Handle SSH: git@github.com:owner/repo.git
@@ -79,7 +86,6 @@ export interface PRResult {
 }
 
 export async function createPR(
-  _worktreePath: string,
   options: PROptions,
 ): Promise<PRResult> {
   const { owner, repo } = parseOwnerRepo(options.repo);
@@ -97,13 +103,11 @@ export async function createPR(
       },
     );
 
-    const existing = (await existingResponse.json()) as unknown;
-    if (Array.isArray(existing) && existing.length > 0) {
-      const pr = existing[0] as Record<string, unknown>;
-      if (typeof pr.html_url === "string" && typeof pr.number === "number") {
-        logger.info({ url: pr.html_url, prNumber: pr.number, branch: options.branch }, "PR already exists, skipping creation");
-        return { url: pr.html_url, number: pr.number };
-      }
+    const parsed = GitHubPRListSchema.safeParse(await existingResponse.json());
+    if (parsed.success && parsed.data.length > 0) {
+      const pr = parsed.data[0];
+      logger.info({ url: pr.html_url, prNumber: pr.number, branch: options.branch }, "PR already exists, skipping creation");
+      return { url: pr.html_url, number: pr.number };
     }
   } catch (err) {
     logger.warn({ err, branch: options.branch }, "Failed to check for existing PRs, proceeding to create");
@@ -128,68 +132,56 @@ export async function createPR(
     { retryableStatuses: [429, 500, 502, 503, 504] },
   );
 
-  const data = (await response.json()) as unknown;
-  const prData = data as Record<string, unknown>;
-  if (typeof prData.html_url !== "string" || typeof prData.number !== "number") {
-    throw new Error(`Unexpected GitHub API response when creating PR: ${JSON.stringify(data)}`);
+  const prParsed = GitHubPRSchema.safeParse(await response.json());
+  if (!prParsed.success) {
+    throw new Error(`Unexpected GitHub API response when creating PR: ${prParsed.error.message}`);
   }
+  const prData = prParsed.data;
 
   const warnings: string[] = [];
 
-  // Add labels if specified (retry once on failure)
+  // Add labels if specified
   if (options.labels?.length) {
     const labelsUrl = `https://api.github.com/repos/${owner}/${repo}/issues/${prData.number}/labels`;
-    const labelsOpts = {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${options.githubToken}`,
-        Accept: "application/vnd.github+json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ labels: options.labels }),
-    };
     try {
-      await fetchWithRetry(labelsUrl, labelsOpts);
-    } catch {
-      // Retry once — label addition is idempotent
-      try {
-        await fetchWithRetry(labelsUrl, labelsOpts);
-      } catch (retryErr) {
-        const msg = `Failed to add labels [${options.labels.join(", ")}] to PR #${prData.number}. Add manually at ${prData.html_url}`;
-        logger.warn({ err: retryErr, labels: options.labels, prNumber: prData.number }, msg);
-        warnings.push(msg);
-      }
+      await fetchWithRetry(labelsUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${options.githubToken}`,
+          Accept: "application/vnd.github+json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ labels: options.labels }),
+      }, { maxRetries: 5 });
+    } catch (err) {
+      const msg = `Failed to add labels [${options.labels.join(", ")}] to PR #${prData.number}. Add manually at ${prData.html_url}`;
+      logger.warn({ err, labels: options.labels, prNumber: prData.number }, msg);
+      warnings.push(msg);
     }
   }
 
-  // Add reviewers if specified (retry once on failure)
+  // Add reviewers if specified
   if (options.reviewers?.length) {
     const reviewersUrl = `https://api.github.com/repos/${owner}/${repo}/pulls/${prData.number}/requested_reviewers`;
-    const reviewersOpts = {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${options.githubToken}`,
-        Accept: "application/vnd.github+json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ reviewers: options.reviewers }),
-    };
     try {
-      await fetchWithRetry(reviewersUrl, reviewersOpts);
-    } catch {
-      // Retry once — reviewer addition is idempotent
-      try {
-        await fetchWithRetry(reviewersUrl, reviewersOpts);
-      } catch (retryErr) {
-        const msg = `Failed to add reviewers [${options.reviewers.join(", ")}] to PR #${prData.number}. Add manually at ${prData.html_url}`;
-        logger.warn({ err: retryErr, reviewers: options.reviewers, prNumber: prData.number }, msg);
-        warnings.push(msg);
-      }
+      await fetchWithRetry(reviewersUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${options.githubToken}`,
+          Accept: "application/vnd.github+json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ reviewers: options.reviewers }),
+      }, { maxRetries: 5 });
+    } catch (err) {
+      const msg = `Failed to add reviewers [${options.reviewers.join(", ")}] to PR #${prData.number}. Add manually at ${prData.html_url}`;
+      logger.warn({ err, reviewers: options.reviewers, prNumber: prData.number }, msg);
+      warnings.push(msg);
     }
   }
 
   logger.info({ url: prData.html_url, prNumber: prData.number, branch: options.branch }, "Created PR");
-  return { url: prData.html_url as string, number: prData.number as number, ...(warnings.length > 0 && { warnings }) };
+  return { url: prData.html_url, number: prData.number, ...(warnings.length > 0 && { warnings }) };
 }
 
 export async function replyToPRComment(

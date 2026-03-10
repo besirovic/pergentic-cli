@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { logger } from "../utils/logger";
-import { buildSafeEnv } from "../utils/process";
+import { buildSafeEnv, SIGKILL_DELAY_MS } from "../utils/process";
 import type { AgentCommand } from "../agents/types";
 import type { SpawnResult } from "../utils/process";
 
@@ -15,6 +15,14 @@ interface ExecResult {
   output: string;
 }
 
+/**
+ * Execute a shell command in the worktree context.
+ *
+ * SECURITY: `cmd` is passed to `sh -c` and executed as-is.
+ * This is intentional — commands come from the project owner's config
+ * (verification.commands or scheduledCommand). The environment is
+ * filtered via buildSafeEnv to limit credential exposure.
+ */
 export function execCommand(
   cmd: string,
   cwd: string,
@@ -101,8 +109,6 @@ export interface AgentHandle {
   process: ChildProcess;
   result: Promise<SpawnResult>;
 }
-
-const SIGKILL_DELAY_MS = 10_000;
 
 export function spawnAgentAndWait(
   agentCmd: AgentCommand,

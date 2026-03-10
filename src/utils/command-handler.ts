@@ -1,7 +1,7 @@
-import chalk from "chalk";
 import { isExitPromptError } from "./prompt-helpers";
+import { error } from "./ui";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Commander.js action callbacks have heterogeneous signatures (string, Options, Command); unknown[] is incompatible
 export function handleCommand<T extends (...args: any[]) => Promise<void>>(fn: T): T {
 	return (async (...args: Parameters<T>) => {
 		try {
@@ -11,8 +11,7 @@ export function handleCommand<T extends (...args: any[]) => Promise<void>>(fn: T
 				process.exit(0);
 			}
 			const msg = err instanceof Error ? err.message : String(err);
-			console.error(`${chalk.red("Error:")} ${msg}`);
-			process.exitCode = 1;
+			error(msg);
 		}
 	}) as T;
 }

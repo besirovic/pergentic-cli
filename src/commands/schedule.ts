@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { select, input } from "@inquirer/prompts";
+// chalk is used for complex multi-color table/prompt output.
+// Simple status messages (error/warn/success) use ../utils/ui.
 import chalk from "chalk";
 import { Cron } from "croner";
+import { error, success } from "../utils/ui";
 import {
 	loadSchedulesConfig,
 	addScheduleEntry,
@@ -173,7 +176,7 @@ export async function scheduleAdd(projectPath: string): Promise<void> {
 		addScheduleEntry(projectPath, entry);
 
 		console.log();
-		console.log(`  ${chalk.green("✓")} Schedule ${chalk.bold(name)} created`);
+		success(`Schedule ${chalk.bold(name)} created`);
 		console.log(`    ${chalk.dim("Cron:")} ${cron}`);
 		console.log(`    ${chalk.dim("Type:")} ${type}`);
 		if (prBehavior === "update") {
@@ -231,29 +234,26 @@ export async function scheduleList(projectPath: string): Promise<void> {
 export async function scheduleRemove(nameOrId: string, projectPath: string): Promise<void> {
 	const removed = removeScheduleEntry(projectPath, nameOrId);
 	if (removed) {
-		console.log(`  ${chalk.green("✓")} Schedule ${chalk.bold(nameOrId)} removed`);
+		success(`Schedule ${chalk.bold(nameOrId)} removed`);
 	} else {
-		console.error(`  ${chalk.red("✗")} Schedule "${nameOrId}" not found`);
-		process.exitCode = 1;
+		error(`Schedule "${nameOrId}" not found`);
 	}
 }
 
 export async function schedulePause(nameOrId: string, projectPath: string): Promise<void> {
 	const updated = setScheduleEnabled(projectPath, nameOrId, false);
 	if (updated) {
-		console.log(`  ${chalk.green("✓")} Schedule ${chalk.bold(nameOrId)} paused`);
+		success(`Schedule ${chalk.bold(nameOrId)} paused`);
 	} else {
-		console.error(`  ${chalk.red("✗")} Schedule "${nameOrId}" not found`);
-		process.exitCode = 1;
+		error(`Schedule "${nameOrId}" not found`);
 	}
 }
 
 export async function scheduleResume(nameOrId: string, projectPath: string): Promise<void> {
 	const updated = setScheduleEnabled(projectPath, nameOrId, true);
 	if (updated) {
-		console.log(`  ${chalk.green("✓")} Schedule ${chalk.bold(nameOrId)} resumed`);
+		success(`Schedule ${chalk.bold(nameOrId)} resumed`);
 	} else {
-		console.error(`  ${chalk.red("✗")} Schedule "${nameOrId}" not found`);
-		process.exitCode = 1;
+		error(`Schedule "${nameOrId}" not found`);
 	}
 }

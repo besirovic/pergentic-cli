@@ -1,5 +1,11 @@
-import { Agent } from "undici";
+import { Agent, type Dispatcher } from "undici";
 import { sleep } from "./sleep";
+
+declare global {
+  interface RequestInit {
+    dispatcher?: Dispatcher;
+  }
+}
 
 // Shared connection pool for all outbound HTTP requests.
 // Node 20+ uses undici under the hood; providing an explicit Agent
@@ -51,8 +57,7 @@ export async function fetchWithRetry(
     try {
       const response = await fetch(url, {
         ...options,
-        // @ts-expect-error -- Node exposes undici's dispatcher option on RequestInit
-        dispatcher: (options as Record<string, unknown>).dispatcher ?? pooledAgent,
+        dispatcher: options.dispatcher ?? pooledAgent,
       });
 
       if (response.ok) return response;
@@ -86,6 +91,6 @@ export async function fetchWithRetry(
     }
   }
 
-  // Should not reach here, but just in case
-  throw new Error(`fetchWithRetry: exhausted ${config.maxRetries} retries for ${url}`);
+  // Unreachable: the loop always returns or throws on the final iteration
+  throw new Error(`fetchWithRetry: exhausted retries for ${url}`);
 }

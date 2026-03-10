@@ -133,6 +133,9 @@ async function main(): Promise<void> {
 	// HTTP server with router
 	const { server, get, post } = createDaemonServer();
 
+	// Handler is intentionally fire-and-forget: the daemon-server API is
+	// synchronous (returns void) so we use .then() to write the response
+	// once the file read completes. Both branches end with res.end().
 	get("/status", (res) => {
 		res.setHeader("Content-Type", "application/json");
 		const statePath = stateFilePath();
@@ -240,10 +243,19 @@ async function updateState(runner: TaskRunner, queue: TaskQueue): Promise<void> 
 
 	try {
 		await atomicWriteFileAsync(stateFilePath(), JSON.stringify(state, null, 2));
-	} catch {
-		// Ignore write errors
+	} catch (err) {
+		logger.warn({ err }, "Failed to write daemon state file");
 	}
 }
+
+const DailyStatsSchema = z.object({
+	tasks: z.number().default(0),
+	prs: z.number().default(0),
+	failed: z.number().default(0),
+	estimatedCost: z.number().default(0),
+});
+
+const DEFAULT_DAILY_STATS = { tasks: 0, prs: 0, failed: 0, estimatedCost: 0 };
 
 async function loadTodayStats(): Promise<{
 	tasks: number;
@@ -254,20 +266,15 @@ async function loadTodayStats(): Promise<{
 	try {
 		const statsPath = statsFilePath();
 		if (!existsSync(statsPath)) {
-			return { tasks: 0, prs: 0, failed: 0, estimatedCost: 0 };
+			return DEFAULT_DAILY_STATS;
 		}
-		const stats = JSON.parse(await readFile(statsPath, "utf-8"));
+		const raw = JSON.parse(await readFile(statsPath, "utf-8"));
 		const today = new Date().toISOString().slice(0, 10);
-		return (
-			stats.dailyStats?.[today] ?? {
-				tasks: 0,
-				prs: 0,
-				failed: 0,
-				estimatedCost: 0,
-			}
-		);
+		const todayRaw = raw?.dailyStats?.[today];
+		const parsed = DailyStatsSchema.safeParse(todayRaw);
+		return parsed.success ? parsed.data : DEFAULT_DAILY_STATS;
 	} catch {
-		return { tasks: 0, prs: 0, failed: 0, estimatedCost: 0 };
+		return DEFAULT_DAILY_STATS;
 	}
 }
 

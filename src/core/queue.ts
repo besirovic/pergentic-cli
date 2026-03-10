@@ -51,13 +51,23 @@ export interface RetryPayload extends BasePayload {
 
 export type TaskPayload = NewTaskPayload | FeedbackPayload | ScheduledPayload | RetryPayload;
 
+/**
+ * Type guard for FeedbackPayload. Use after checking `task.type === "feedback"` —
+ * these guards narrow the TypeScript type but should not be the primary discriminator.
+ */
 export function isFeedbackPayload(payload: TaskPayload): payload is FeedbackPayload {
-  return "comment" in payload || "prNumber" in payload;
+  return "prNumber" in payload;
 }
 
+/**
+ * Type guard for ScheduledPayload. Use after checking `task.type === "scheduled"` —
+ * these guards narrow the TypeScript type but should not be the primary discriminator.
+ */
 export function isScheduledPayload(payload: TaskPayload): payload is ScheduledPayload {
   return "scheduleId" in payload || "scheduledCommand" in payload || "schedulePrBehavior" in payload;
 }
+
+const MAX_FAILED_ENTRIES = 10_000;
 
 export class TaskQueue {
   private tasks: Task[] = [];
@@ -68,8 +78,15 @@ export class TaskQueue {
     if (this.seen.has(task.id)) return false;
     if (this.failed.has(task.id)) return false;
     this.seen.add(task.id);
-    this.tasks.push(task);
-    this.tasks.sort((a, b) => a.priority - b.priority);
+
+    // Binary search for insertion point (sorted by priority ascending)
+    let lo = 0, hi = this.tasks.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (this.tasks[mid].priority <= task.priority) lo = mid + 1;
+      else hi = mid;
+    }
+    this.tasks.splice(lo, 0, task);
     return true;
   }
 
@@ -80,6 +97,10 @@ export class TaskQueue {
   }
 
   markFailed(id: string): void {
+    if (this.failed.size >= MAX_FAILED_ENTRIES) {
+      const oldest = this.failed.values().next().value;
+      if (oldest !== undefined) this.failed.delete(oldest);
+    }
     this.failed.add(id);
   }
 
