@@ -134,6 +134,9 @@ const PromptTemplateConfigSchema = z.object({
 	path: z.string().default("PROMPT.md"),
 });
 
+export const TaskSource = z.enum(["linear", "github", "slack", "schedule"]);
+export type TaskSource = z.infer<typeof TaskSource>;
+
 export const ScheduleType = z.enum(["prompt", "command"]);
 export const PRBehavior = z.enum(["new", "update"]);
 

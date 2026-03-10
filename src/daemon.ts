@@ -13,9 +13,22 @@ import { acquireLock, releaseLock } from "./utils/health";
 import { pruneStats, STATS_RETENTION_DAYS } from "./core/cost";
 import { pruneEvents, MAX_EVENT_ENTRIES } from "./core/events";
 import { createDaemonServer } from "./utils/daemon-server";
+import { TaskSource } from "./config/schema";
+import { z } from "zod";
 import type { Task } from "./core/queue";
 
 const logger = createLogger("daemon");
+
+const RetryRequestSchema = z.object({
+	taskId: z.string().min(1).max(200),
+	project: z.string().min(1).max(200),
+	source: TaskSource.optional(),
+});
+
+const CancelRequestSchema = z.object({
+	taskId: z.string().min(1).max(200),
+});
+
 const STATE_UPDATE_INTERVAL_MS = 3000;
 const SHUTDOWN_TIMEOUT_MS = 300_000;
 let shuttingDown = false;
@@ -131,11 +144,14 @@ async function main(): Promise<void> {
 
 	post("/retry", (body, res) => {
 		try {
-			const { taskId, project, source } = JSON.parse(body);
-			if (!taskId || !project) {
-				res.writeHead(400).end("Missing required fields: taskId, project");
+			const parsed = RetryRequestSchema.safeParse(JSON.parse(body));
+			if (!parsed.success) {
+				res.writeHead(400, { "Content-Type": "application/json" }).end(
+					JSON.stringify({ error: parsed.error.issues.map((i) => i.message).join("; ") }),
+				);
 				return;
 			}
+			const { taskId, project, source } = parsed.data;
 			queue.add({
 				id: `retry-${taskId}-${Date.now()}`,
 				project,
@@ -151,21 +167,31 @@ async function main(): Promise<void> {
 			});
 			res.writeHead(200).end("OK");
 		} catch {
-			res.writeHead(400).end("Bad request");
+			res.writeHead(400, { "Content-Type": "application/json" }).end(
+				JSON.stringify({ error: "Invalid JSON" }),
+			);
 		}
 	});
 
 	post("/cancel", (body, res) => {
 		try {
-			const { taskId } = JSON.parse(body);
-			const cancelled = runner.cancelTask(taskId);
+			const parsed = CancelRequestSchema.safeParse(JSON.parse(body));
+			if (!parsed.success) {
+				res.writeHead(400, { "Content-Type": "application/json" }).end(
+					JSON.stringify({ error: parsed.error.issues.map((i) => i.message).join("; ") }),
+				);
+				return;
+			}
+			const cancelled = runner.cancelTask(parsed.data.taskId);
 			if (cancelled) {
 				res.writeHead(200).end("Cancelled");
 			} else {
 				res.writeHead(404).end("Task not found");
 			}
 		} catch {
-			res.writeHead(400).end("Bad request");
+			res.writeHead(400, { "Content-Type": "application/json" }).end(
+				JSON.stringify({ error: "Invalid JSON" }),
+			);
 		}
 	});
 
