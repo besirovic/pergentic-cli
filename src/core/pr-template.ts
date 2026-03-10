@@ -62,7 +62,7 @@ export async function detectPRTemplate(
 				"PR template path escapes repository root, ignoring",
 			);
 		} else if (existsSync(full)) {
-			logger.debug({ path: explicitPath }, "Using configured PR template");
+			logger.info({ path: explicitPath }, "Using configured PR template");
 			return readSafeTemplate(full);
 		} else {
 			logger.warn(
@@ -76,7 +76,7 @@ export async function detectPRTemplate(
 	for (const relPath of PR_TEMPLATE_PATHS) {
 		const full = join(repoRoot, relPath);
 		if (existsSync(full)) {
-			logger.debug({ path: relPath }, "Auto-detected PR template");
+			logger.info({ path: relPath }, "Using auto-detected PR template");
 			return readSafeTemplate(full);
 		}
 	}
@@ -90,11 +90,11 @@ export async function detectPRTemplate(
 				.sort();
 			if (files.length > 0) {
 				const picked = join(templateDir, files[0]);
-				logger.debug({ path: `.github/PULL_REQUEST_TEMPLATE/${files[0]}` }, "Auto-detected PR template from directory");
+				logger.info({ path: `.github/PULL_REQUEST_TEMPLATE/${files[0]}` }, "Using auto-detected PR template from directory");
 				return readSafeTemplate(picked);
 			}
 		} catch (err) {
-			logger.debug({ err, path: templateDir }, "Failed to read PR template directory");
+			logger.warn({ err, path: templateDir }, "Failed to read PR template directory");
 		}
 	}
 
