@@ -186,7 +186,13 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
         task, projectConfig, projectName, worktree, agentCmd, agentEnv,
         agentOptions, agent, startTime,
       ).catch((err) => {
-        logger.error({ taskId: task.id, err }, "Unhandled error in task execution");
+        try {
+          logger.error({ taskId: task.id, err }, "Unhandled error in task execution");
+        } catch {
+          console.error("Failed to log task execution error:", err);
+        }
+        this.active.delete(task.id);
+        this.emit("taskFailed", task, err);
       });
 
       return true;
@@ -517,7 +523,13 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
     this.executeScheduledCommand(
       task, projectConfig, projectName, worktree, command, startTime,
     ).catch((err) => {
-      logger.error({ taskId: task.id, err }, "Unhandled error in scheduled command execution");
+      try {
+        logger.error({ taskId: task.id, err }, "Unhandled error in scheduled command execution");
+      } catch {
+        console.error("Failed to log scheduled command execution error:", err);
+      }
+      this.active.delete(task.id);
+      this.emit("taskFailed", task, err);
     });
 
     return true;
