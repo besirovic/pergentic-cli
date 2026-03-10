@@ -19,21 +19,36 @@ export interface TaskEvent {
 	retriesAttempted?: number;
 }
 
-function formatSlackMessage(event: TaskEvent): string {
+type NotificationDialect = "slack" | "discord";
+
+const dialectSyntax: Record<NotificationDialect, { bold: (s: string) => string; link: (url: string, text: string) => string }> = {
+	slack: {
+		bold: (s) => `*${s}*`,
+		link: (url, text) => `<${url}|${text}>`,
+	},
+	discord: {
+		bold: (s) => `**${s}**`,
+		link: (url, text) => `[${text}](${url})`,
+	},
+};
+
+function formatNotificationMessage(event: TaskEvent, dialect: NotificationDialect): string {
+	const { bold, link } = dialectSyntax[dialect];
+
 	switch (event.type) {
 		case "taskCompleted":
 		case "prCreated":
 			return [
-				`✅ *${event.taskId}:* ${event.title}`,
-				`*Project:* ${event.project}`,
+				`${dialect === "slack" ? "✅ " : ""}${bold(`${event.taskId}:`)} ${event.title}`,
+				`${bold("Project:")} ${event.project}`,
 				event.prUrl
-					? `*PR:* <${event.prUrl}|View Pull Request>`
+					? `${bold("PR:")} ${link(event.prUrl, "View Pull Request")}`
 					: "",
 				event.duration
-					? `*Duration:* ${formatDuration(event.duration)}`
+					? `${bold("Duration:")} ${formatDuration(event.duration)}`
 					: "",
 				event.estimatedCost
-					? `*Cost:* $${event.estimatedCost.toFixed(2)}`
+					? `${bold("Cost:")} $${event.estimatedCost.toFixed(2)}`
 					: "",
 			]
 				.filter(Boolean)
@@ -41,49 +56,14 @@ function formatSlackMessage(event: TaskEvent): string {
 
 		case "taskFailed":
 			return [
-				`❌ *${event.taskId}:* ${event.title}`,
-				`*Project:* ${event.project}`,
+				`${dialect === "slack" ? "❌ " : ""}${bold(`${event.taskId}:`)} ${event.title}`,
+				`${bold("Project:")} ${event.project}`,
 				event.retriesAttempted
-					? `*Retries:* ${event.retriesAttempted} automatic retries attempted`
+					? `${bold("Retries:")} ${event.retriesAttempted} automatic retries attempted`
 					: "",
 				event.error
-					? `*Error:*\n\`\`\`${event.error}\`\`\``
-					: "*Error:* Unknown",
-				`Run \`pergentic retry ${event.taskId}\` to retry`,
-			].filter(Boolean).join("\n");
-	}
-}
-
-function formatDiscordMessage(event: TaskEvent): string {
-	switch (event.type) {
-		case "taskCompleted":
-		case "prCreated":
-			return [
-				`**${event.taskId}:** ${event.title}`,
-				`**Project:** ${event.project}`,
-				event.prUrl
-					? `**PR:** [View Pull Request](${event.prUrl})`
-					: "",
-				event.duration
-					? `**Duration:** ${formatDuration(event.duration)}`
-					: "",
-				event.estimatedCost
-					? `**Cost:** $${event.estimatedCost.toFixed(2)}`
-					: "",
-			]
-				.filter(Boolean)
-				.join("\n");
-
-		case "taskFailed":
-			return [
-				`**${event.taskId}:** ${event.title}`,
-				`**Project:** ${event.project}`,
-				event.retriesAttempted
-					? `**Retries:** ${event.retriesAttempted} automatic retries attempted`
-					: "",
-				event.error
-					? `**Error:**\n\`\`\`${event.error}\`\`\``
-					: "**Error:** Unknown",
+					? `${bold("Error:")}\n\`\`\`${event.error}\`\`\``
+					: `${bold("Error:")} Unknown`,
 				`Run \`pergentic retry ${event.taskId}\` to retry`,
 			].filter(Boolean).join("\n");
 	}
@@ -193,7 +173,7 @@ export async function notify(
 		if (channelId && botToken) {
 			// Route to specific channel via Bot API
 			promises.push(
-				sendSlackBotMessage(channelId, formatSlackMessage(event), botToken)
+				sendSlackBotMessage(channelId, formatNotificationMessage(event, "slack"), botToken)
 					.then(() => {
 						logger.debug({ event: event.type, channel: channelId }, "Slack notification sent to channel");
 					})
@@ -207,7 +187,7 @@ export async function notify(
 				fetchWithRetry(notifications.slack.webhook, {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ text: formatSlackMessage(event) }),
+					body: JSON.stringify({ text: formatNotificationMessage(event, "slack") }),
 				})
 					.then(() => {
 						logger.debug({ event: event.type }, "Slack notification sent");
@@ -224,7 +204,7 @@ export async function notify(
 			fetchWithRetry(notifications.discord.webhook, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ content: formatDiscordMessage(event) }),
+				body: JSON.stringify({ content: formatNotificationMessage(event, "discord") }),
 			})
 				.then(() => {
 					logger.debug({ event: event.type }, "Discord notification sent");
