@@ -84,6 +84,22 @@ describe("TaskQueue", () => {
     expect(q.has("a")).toBe(false);
   });
 
+  it("allows re-adding after task is removed", () => {
+    const q = new TaskQueue();
+    q.add(makeTask("a", TaskPriority.NEW));
+    q.remove("a");
+    expect(q.add(makeTask("a", TaskPriority.NEW))).toBe(true);
+    expect(q.length).toBe(1);
+  });
+
+  it("prevents re-adding a failed task", () => {
+    const q = new TaskQueue();
+    q.add(makeTask("a", TaskPriority.NEW));
+    q.next();
+    q.markFailed("a");
+    expect(q.add(makeTask("a", TaskPriority.NEW))).toBe(false);
+  });
+
   it("lists active tasks", () => {
     const q = new TaskQueue();
     q.add(makeTask("a", TaskPriority.FEEDBACK));

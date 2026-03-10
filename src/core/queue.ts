@@ -74,7 +74,9 @@ export class TaskQueue {
   }
 
   next(): Task | undefined {
-    return this.tasks.shift();
+    const task = this.tasks.shift();
+    if (task) this.seen.delete(task.id);
+    return task;
   }
 
   markFailed(id: string): void {
@@ -93,6 +95,7 @@ export class TaskQueue {
     const idx = this.tasks.findIndex((t) => t.id === id);
     if (idx === -1) return false;
     this.tasks.splice(idx, 1);
+    this.seen.delete(id);
     return true;
   }
 
