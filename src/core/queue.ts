@@ -51,22 +51,6 @@ export interface RetryPayload extends BasePayload {
 
 export type TaskPayload = NewTaskPayload | FeedbackPayload | ScheduledPayload | RetryPayload;
 
-/**
- * Type guard for FeedbackPayload. Use after checking `task.type === "feedback"` —
- * these guards narrow the TypeScript type but should not be the primary discriminator.
- */
-export function isFeedbackPayload(payload: TaskPayload): payload is FeedbackPayload {
-  return "prNumber" in payload;
-}
-
-/**
- * Type guard for ScheduledPayload. Use after checking `task.type === "scheduled"` —
- * these guards narrow the TypeScript type but should not be the primary discriminator.
- */
-export function isScheduledPayload(payload: TaskPayload): payload is ScheduledPayload {
-  return "scheduleId" in payload || "scheduledCommand" in payload || "schedulePrBehavior" in payload;
-}
-
 const MAX_FAILED_ENTRIES = 10_000;
 
 export class TaskQueue {
@@ -126,7 +110,7 @@ export class TaskQueue {
 
   hasScheduleId(scheduleId: string): boolean {
     return this.tasks.some(
-      (t) => t.type === "scheduled" && "scheduleId" in t.payload && t.payload.scheduleId === scheduleId,
+      (t) => t.type === "scheduled" && (t.payload as ScheduledPayload).scheduleId === scheduleId,
     );
   }
 

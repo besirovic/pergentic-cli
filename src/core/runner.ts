@@ -2,7 +2,7 @@ import { type ChildProcess } from "node:child_process";
 import type { WorktreeInfo } from "./worktree";
 import { logger } from "../utils/logger";
 import { TypedEventEmitter } from "../types/typed-emitter";
-import type { Task } from "./queue";
+import type { Task, ScheduledPayload, FeedbackPayload } from "./queue";
 import { AgentName } from "../config/schema";
 import type { GlobalConfig, ProjectConfig } from "../config/schema";
 import { buildBranchName, buildBranchTemplateVars, DEFAULT_BRANCH_TEMPLATE } from "./branch-name";
@@ -88,13 +88,11 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       freshClone = !repoExisted;
 
       const isStandingBranch = task.type === "scheduled"
-        && "schedulePrBehavior" in payload
-        && payload.schedulePrBehavior === "update"
-        && "schedulePrBranch" in payload
-        && !!payload.schedulePrBranch;
+        && (payload as ScheduledPayload).schedulePrBehavior === "update"
+        && !!(payload as ScheduledPayload).schedulePrBranch;
 
       const worktreeTaskId = isStandingBranch
-          ? payload.schedulePrBranch!
+          ? (payload as ScheduledPayload).schedulePrBranch!
           : payload.taskId;
 
       // Resolve branch name from template (skip for standing branches and default template)
@@ -133,12 +131,12 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
         const history =
           (await this.deps.feedback.loadHistory(worktree.path)) ??
           (await this.deps.feedback.initHistory(worktree.path, payload.taskId, payload.description));
-        const comment = "comment" in payload ? payload.comment ?? "" : "";
+        const comment = (payload as FeedbackPayload).comment ?? "";
         await this.deps.feedback.addFeedbackRound(worktree.path, comment);
         prompt = this.deps.feedback.buildFeedbackPrompt(history, comment);
-      } else if (task.type === "scheduled" && "scheduledCommand" in payload && payload.scheduledCommand) {
+      } else if (task.type === "scheduled" && (payload as ScheduledPayload).scheduledCommand) {
         return this.runScheduledCommand(task, projectConfig, projectName, worktree, startTime);
-      } else if (task.type === "scheduled" && !("scheduledCommand" in payload && payload.scheduledCommand)) {
+      } else if (task.type === "scheduled" && !(payload as ScheduledPayload).scheduledCommand) {
         prompt = payload.description;
       } else {
         await this.deps.feedback.initHistory(worktree.path, payload.taskId, payload.description);
@@ -423,7 +421,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
     startTime: number,
   ): Promise<boolean> {
     const { payload } = task;
-    const command = "scheduledCommand" in payload ? payload.scheduledCommand! : "";
+    const command = (payload as ScheduledPayload).scheduledCommand ?? "";
 
     const abortController = new AbortController();
     const activeTask: ActiveTask = { task, process: null, worktree, startTime, abortController };

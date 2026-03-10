@@ -1,4 +1,4 @@
-import type { Task } from "./queue";
+import type { Task, ScheduledPayload } from "./queue";
 import type { ProjectConfig } from "../config/schema";
 
 export interface PRDetails {
@@ -45,7 +45,7 @@ export function buildPRDetails(
 	// Use agent-generated PR body if provided, otherwise fall back to configured template
 	const body = agentBody
 		?? (isScheduled
-			? `Automated scheduled task: **${payload.title}**\n\nSchedule: \`${"scheduleId" in payload ? payload.scheduleId : ""}\``
+			? `Automated scheduled task: **${payload.title}**\n\nSchedule: \`${(payload as ScheduledPayload).scheduleId ?? ""}\``
 			: (prConfig?.bodyTemplate ?? "Resolves {taskId}")
 					.replace("{taskTitle}", payload.title)
 					.replace("{taskId}", payload.taskId));
