@@ -1,5 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 
+const MAX_BODY_BYTES = 1_048_576; // 1 MB
+
 type RouteHandler = (body: string, res: ServerResponse) => void;
 
 interface Route {
@@ -33,8 +35,22 @@ export function createDaemonServer(): {
       const route = routes.find((r) => r.method === "POST" && r.path === url);
       if (route) {
         let body = "";
-        req.on("data", (chunk) => (body += chunk));
-        req.on("end", () => route.handler(body, res));
+        let bodyBytes = 0;
+        let rejected = false;
+        req.on("data", (chunk: Buffer) => {
+          if (rejected) return;
+          bodyBytes += chunk.length;
+          if (bodyBytes > MAX_BODY_BYTES) {
+            rejected = true;
+            res.writeHead(413).end();
+            req.resume(); // drain remaining data
+            return;
+          }
+          body += chunk;
+        });
+        req.on("end", () => {
+          if (!rejected) route.handler(body, res);
+        });
         return;
       }
     }
