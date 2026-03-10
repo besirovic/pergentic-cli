@@ -52,6 +52,16 @@ interface LinearIssue {
   labels: { nodes: Array<{ name: string }> };
 }
 
+/**
+ * Extract the Linear issue identifier (e.g. "LIN-123") from a task ID.
+ * Handles both single-agent IDs ("linear-LIN-123") and multi-agent
+ * dispatch IDs ("linear-LIN-123-claude-code").
+ */
+export function extractLinearIdentifier(taskId: string): string {
+  const match = taskId.match(/^linear-([A-Z]+-\d+)/);
+  return match ? match[1] : taskId.replace("linear-", "");
+}
+
 export class LinearProvider extends BaseProvider {
   name = "linear";
   private apiKey: string;
@@ -128,7 +138,7 @@ export class LinearProvider extends BaseProvider {
     taskId: string,
     result: TaskResult,
   ): Promise<void> {
-    const linearId = taskId.replace("linear-", "");
+    const linearId = extractLinearIdentifier(taskId);
 
     const stateName =
       result.status === "completed" ? "In Review" : "In Progress";
