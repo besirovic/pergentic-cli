@@ -114,6 +114,84 @@ async function postJiraComment(
   );
 }
 
+async function dispatchCommentToProviders(
+  body: string,
+  task: Task,
+  projectConfig: ProjectConfig,
+  repo: string,
+  logPrefix: string,
+): Promise<void> {
+  const { payload } = task;
+  const promises: Promise<void>[] = [];
+
+  // Post on Linear issue if source is linear
+  if (
+    payload.source === "linear" &&
+    payload.metadata?.linearId &&
+    projectConfig.linearApiKey
+  ) {
+    const linearId = payload.metadata.linearId;
+    if (typeof linearId === "string") {
+      promises.push(
+        postLinearComment(
+          linearId,
+          body,
+          projectConfig.linearApiKey,
+        ).catch((err) => {
+          logger.error({ err }, `Failed to post Linear ${logPrefix} comment`);
+        }),
+      );
+    }
+  }
+
+  // Post on GitHub issue if source is github
+  if (
+    payload.source === "github" &&
+    payload.metadata?.issueNumber &&
+    projectConfig.githubToken
+  ) {
+    const issueNumber = payload.metadata.issueNumber;
+    if (typeof issueNumber === "number") {
+      promises.push(
+        replyToPRComment(
+          repo,
+          issueNumber,
+          body,
+          projectConfig.githubToken,
+        ).catch((err) => {
+          logger.error({ err }, `Failed to post GitHub ${logPrefix} comment`);
+        }),
+      );
+    }
+  }
+
+  // Post on Jira ticket if source is jira
+  if (
+    payload.source === "jira" &&
+    payload.metadata?.jiraIssueKey &&
+    projectConfig.jiraDomain &&
+    projectConfig.jiraEmail &&
+    projectConfig.jiraApiToken
+  ) {
+    const jiraIssueKey = payload.metadata.jiraIssueKey;
+    if (typeof jiraIssueKey === "string") {
+      promises.push(
+        postJiraComment(
+          jiraIssueKey,
+          body,
+          projectConfig.jiraDomain,
+          projectConfig.jiraEmail,
+          projectConfig.jiraApiToken,
+        ).catch((err) => {
+          logger.error({ err }, `Failed to post Jira ${logPrefix} comment`);
+        }),
+      );
+    }
+  }
+
+  await Promise.allSettled(promises);
+}
+
 export interface VerificationFailureContext {
   task: Task;
   projectConfig: ProjectConfig;
@@ -141,76 +219,13 @@ export async function postVerificationFailureComment(ctx: VerificationFailureCon
     "*Automated by pergentic*",
   ].join("\n");
 
-  const { payload } = ctx.task;
-  const { projectConfig } = ctx;
-  const promises: Promise<void>[] = [];
-
-  // Post on Linear issue if source is linear
-  if (
-    payload.source === "linear" &&
-    payload.metadata?.linearId &&
-    projectConfig.linearApiKey
-  ) {
-    const linearId = payload.metadata.linearId;
-    if (typeof linearId === "string") {
-      promises.push(
-        postLinearComment(
-          linearId,
-          body,
-          projectConfig.linearApiKey,
-        ).catch((err) => {
-          logger.error({ err }, "Failed to post Linear verification failure comment");
-        }),
-      );
-    }
-  }
-
-  // Post on GitHub issue if source is github
-  if (
-    payload.source === "github" &&
-    payload.metadata?.issueNumber &&
-    projectConfig.githubToken
-  ) {
-    const issueNumber = payload.metadata.issueNumber;
-    if (typeof issueNumber === "number") {
-      promises.push(
-        replyToPRComment(
-          projectConfig.repo,
-          issueNumber,
-          body,
-          projectConfig.githubToken,
-        ).catch((err) => {
-          logger.error({ err }, "Failed to post GitHub verification failure comment");
-        }),
-      );
-    }
-  }
-
-  // Post on Jira ticket if source is jira
-  if (
-    payload.source === "jira" &&
-    payload.metadata?.jiraIssueKey &&
-    projectConfig.jiraDomain &&
-    projectConfig.jiraEmail &&
-    projectConfig.jiraApiToken
-  ) {
-    const jiraIssueKey = payload.metadata.jiraIssueKey;
-    if (typeof jiraIssueKey === "string") {
-      promises.push(
-        postJiraComment(
-          jiraIssueKey,
-          body,
-          projectConfig.jiraDomain,
-          projectConfig.jiraEmail,
-          projectConfig.jiraApiToken,
-        ).catch((err) => {
-          logger.error({ err }, "Failed to post Jira verification failure comment");
-        }),
-      );
-    }
-  }
-
-  await Promise.allSettled(promises);
+  await dispatchCommentToProviders(
+    body,
+    ctx.task,
+    ctx.projectConfig,
+    ctx.projectConfig.repo,
+    "verification failure",
+  );
 }
 
 export async function postTaskComments(ctx: CommentContext): Promise<void> {
@@ -235,85 +250,16 @@ export async function postTaskComments(ctx: CommentContext): Promise<void> {
     prUrl: ctx.prUrl,
   });
 
-  const { payload } = ctx.task;
   const { projectConfig } = ctx;
   const githubToken = projectConfig.githubToken ?? "";
 
-  const promises: Promise<void>[] = [];
-
-  // Always post on the PR
-  promises.push(
+  // Always post on the PR, and dispatch to source provider concurrently
+  await Promise.allSettled([
     replyToPRComment(ctx.repo, ctx.prNumber, body, githubToken).catch(
       (err) => {
         logger.error({ err }, "Failed to post PR comment");
       },
     ),
-  );
-
-  // Post on Linear issue if source is linear
-  if (
-    payload.source === "linear" &&
-    payload.metadata?.linearId &&
-    projectConfig.linearApiKey
-  ) {
-    const linearId = payload.metadata.linearId;
-    if (typeof linearId === "string") {
-      promises.push(
-        postLinearComment(
-          linearId,
-          body,
-          projectConfig.linearApiKey,
-        ).catch((err) => {
-          logger.error({ err }, "Failed to post Linear comment");
-        }),
-      );
-    }
-  }
-
-  // Post on GitHub issue if source is github
-  if (
-    payload.source === "github" &&
-    payload.metadata?.issueNumber &&
-    githubToken
-  ) {
-    const issueNumber = payload.metadata.issueNumber;
-    if (typeof issueNumber === "number") {
-      promises.push(
-        replyToPRComment(
-          ctx.repo,
-          issueNumber,
-          body,
-          githubToken,
-        ).catch((err) => {
-          logger.error({ err }, "Failed to post GitHub issue comment");
-        }),
-      );
-    }
-  }
-
-  // Post on Jira ticket if source is jira
-  if (
-    payload.source === "jira" &&
-    payload.metadata?.jiraIssueKey &&
-    projectConfig.jiraDomain &&
-    projectConfig.jiraEmail &&
-    projectConfig.jiraApiToken
-  ) {
-    const jiraIssueKey = payload.metadata.jiraIssueKey;
-    if (typeof jiraIssueKey === "string") {
-      promises.push(
-        postJiraComment(
-          jiraIssueKey,
-          body,
-          projectConfig.jiraDomain,
-          projectConfig.jiraEmail,
-          projectConfig.jiraApiToken,
-        ).catch((err) => {
-          logger.error({ err }, "Failed to post Jira comment");
-        }),
-      );
-    }
-  }
-
-  await Promise.allSettled(promises);
+    dispatchCommentToProviders(body, ctx.task, projectConfig, ctx.repo, "issue"),
+  ]);
 }
