@@ -1,4 +1,14 @@
+import { Agent } from "undici";
 import { sleep } from "./sleep";
+
+// Shared connection pool for all outbound HTTP requests.
+// Node 20+ uses undici under the hood; providing an explicit Agent
+// ensures keep-alive and connection reuse across polling cycles.
+const pooledAgent = new Agent({
+  keepAliveTimeout: 30_000,
+  keepAliveMaxTimeout: 60_000,
+  connections: 10,
+});
 
 export class HttpError extends Error {
   status: number;
@@ -37,7 +47,11 @@ export async function fetchWithRetry(
 
   for (let attempt = 0; attempt <= config.maxRetries; attempt++) {
     try {
-      const response = await fetch(url, options);
+      const response = await fetch(url, {
+        ...options,
+        // @ts-expect-error -- Node exposes undici's dispatcher option on RequestInit
+        dispatcher: (options as Record<string, unknown>).dispatcher ?? pooledAgent,
+      });
 
       if (response.ok) return response;
 
