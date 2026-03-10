@@ -8,6 +8,7 @@ import type { GlobalConfig, ProjectConfig } from "../config/schema";
 import { buildBranchName, buildBranchTemplateVars, DEFAULT_BRANCH_TEMPLATE } from "./branch-name";
 import { buildPromptFromTemplate } from "./prompt-template";
 import { type SpawnResult, SIGKILL_DELAY_MS } from "../utils/process";
+import { redactArgs } from "../utils/redact";
 import { cancellableSleep } from "../utils/sleep";
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -165,8 +166,12 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       const agentCmd = agent.buildCommand(prompt, worktree.path, agentOptions);
 
       logger.info(
-        { taskId: task.id, command: agentCmd.command, args: agentCmd.args, cwd: worktree.path },
+        { taskId: task.id, command: agentCmd.command, argCount: agentCmd.args.length, cwd: worktree.path },
         "Executing agent command",
+      );
+      logger.debug(
+        { taskId: task.id, args: redactArgs(agentCmd.args) },
+        "Agent command args",
       );
 
       const agentEnv: Record<string, string | undefined> = {
