@@ -473,13 +473,15 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
 
     const proc = active.process;
     if (proc) {
-      setTimeout(() => {
+      const killTimer = setTimeout(() => {
         try {
           proc.kill("SIGKILL");
         } catch {
           /* already dead */
         }
       }, SIGKILL_DELAY_MS);
+      // Don't let the SIGKILL fallback timer keep the Node.js event loop alive
+      killTimer.unref();
     }
 
     this.active.delete(taskId);

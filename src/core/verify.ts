@@ -163,6 +163,7 @@ export function spawnAgentAndWait(
       killTimer = setTimeout(() => {
         child.kill("SIGKILL");
       }, SIGKILL_DELAY_MS);
+      killTimer.unref();
     }, timeoutMs);
   }
 
