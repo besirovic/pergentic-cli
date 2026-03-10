@@ -7,6 +7,8 @@ import { loadProjectsRegistry, loadProjectConfig } from "../config/loader";
 import type { ScheduleEntry } from "../config/schema";
 import { logger } from "../utils/logger";
 
+const MAX_LAST_DISPATCHED = 1000;
+
 export class Scheduler {
 	private queue: TaskQueue;
 	private runner: TaskRunner;
@@ -129,6 +131,7 @@ export class Scheduler {
 					return;
 				}
 				this.lastDispatched.set(schedule.id, now.getTime());
+				this.pruneLastDispatched();
 				logger.info({ scheduleId: schedule.id, taskId, project: projectName }, "Queued scheduled prompt task");
 			} else {
 				this.active.delete(schedule.id);
@@ -169,6 +172,7 @@ export class Scheduler {
 					return;
 				}
 				this.lastDispatched.set(schedule.id, now.getTime());
+				this.pruneLastDispatched();
 				logger.info({ scheduleId: schedule.id, taskId, project: projectName }, "Queued scheduled command task");
 			} else {
 				this.active.delete(schedule.id);
@@ -178,5 +182,14 @@ export class Scheduler {
 
 	clearActive(scheduleId: string): void {
 		this.active.delete(scheduleId);
+	}
+
+	private pruneLastDispatched(): void {
+		if (this.lastDispatched.size <= MAX_LAST_DISPATCHED) return;
+		const sorted = Array.from(this.lastDispatched.entries()).sort((a, b) => a[1] - b[1]);
+		const toRemove = sorted.slice(0, sorted.length - MAX_LAST_DISPATCHED);
+		for (const [key] of toRemove) {
+			this.lastDispatched.delete(key);
+		}
 	}
 }
