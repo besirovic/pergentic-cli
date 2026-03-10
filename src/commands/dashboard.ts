@@ -50,15 +50,26 @@ export async function dashboard(): Promise<void> {
 
 	if (!render()) return;
 
-	const interval = setInterval(() => {
-		render();
-	}, 1000);
+	let consecutiveFailures = 0;
+	const maxFailures = 3;
 
-	process.on("SIGINT", () => {
-		clearInterval(interval);
-		process.exit(0);
+	await new Promise<void>((resolve) => {
+		const interval = setInterval(() => {
+			if (render()) {
+				consecutiveFailures = 0;
+			} else {
+				consecutiveFailures++;
+				if (consecutiveFailures >= maxFailures) {
+					clearInterval(interval);
+					resolve();
+				}
+			}
+		}, 1000);
+
+		const cleanup = () => {
+			clearInterval(interval);
+			resolve();
+		};
+		process.once("SIGINT", cleanup);
 	});
-
-	// Keep process alive
-	await new Promise(() => {});
 }
