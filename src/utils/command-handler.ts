@@ -12,6 +12,7 @@ export function handleCommand<T extends (...args: any[]) => Promise<void>>(fn: T
 			}
 			const msg = err instanceof Error ? err.message : String(err);
 			error(msg);
+			process.exitCode = 1;
 		}
 	}) as T;
 }
