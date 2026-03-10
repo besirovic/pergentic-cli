@@ -33,7 +33,10 @@ const CancelRequestSchema = z.object({
 
 const STATE_UPDATE_INTERVAL_MS = 3000;
 const SHUTDOWN_TIMEOUT_MS = 300_000;
+const STATS_CACHE_TTL_MS = 30_000;
 let shuttingDown = false;
+
+let statsCache: { data: { tasks: number; prs: number; failed: number; estimatedCost: number }; timestamp: number } | null = null;
 
 async function createProviderForSource(
 	source: string,
@@ -283,17 +286,25 @@ async function loadTodayStats(): Promise<{
 	failed: number;
 	estimatedCost: number;
 }> {
+	if (statsCache && Date.now() - statsCache.timestamp < STATS_CACHE_TTL_MS) {
+		return statsCache.data;
+	}
+
 	try {
 		const statsPath = statsFilePath();
 		if (!existsSync(statsPath)) {
+			statsCache = { data: DEFAULT_DAILY_STATS, timestamp: Date.now() };
 			return DEFAULT_DAILY_STATS;
 		}
 		const raw = JSON.parse(await readFile(statsPath, "utf-8"));
 		const today = new Date().toISOString().slice(0, 10);
 		const todayRaw = raw?.dailyStats?.[today];
 		const parsed = DailyStatsSchema.safeParse(todayRaw);
-		return parsed.success ? parsed.data : DEFAULT_DAILY_STATS;
+		const data = parsed.success ? parsed.data : DEFAULT_DAILY_STATS;
+		statsCache = { data, timestamp: Date.now() };
+		return data;
 	} catch {
+		statsCache = { data: DEFAULT_DAILY_STATS, timestamp: Date.now() };
 		return DEFAULT_DAILY_STATS;
 	}
 }
