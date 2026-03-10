@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { envFilePath, projectEnvPath, projectConfigPath } from "./paths";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { logger } from "../utils/logger";
 
 export interface ResolvedSecrets {
   anthropicApiKey?: string;
@@ -59,6 +60,41 @@ export function parseEnvFile(filePath: string): Record<string, string> {
   return result;
 }
 
+const PLACEHOLDER_PATTERNS = [
+  /^your[-_\w]*[-_]?here$/i,
+  /^<.*>$/,
+  /^TODO$/i,
+  /^CHANGEME$/i,
+  /^xxx+$/i,
+  /^replace[-_]?me$/i,
+  /^sk-ant-api-\.\.\./,
+];
+
+const KEY_PREFIX_RULES: Partial<
+  Record<keyof ResolvedSecrets, { prefix: string; label: string }>
+> = {
+  anthropicApiKey: { prefix: "sk-ant-", label: "Anthropic API key" },
+  githubToken: { prefix: "ghp_", label: "GitHub token" },
+  linearApiKey: { prefix: "lin_api_", label: "Linear API key" },
+};
+
+function isPlaceholder(value: string): boolean {
+  return PLACEHOLDER_PATTERNS.some((p) => p.test(value));
+}
+
+function validateSecretFormat(
+  field: keyof ResolvedSecrets,
+  value: string,
+): boolean {
+  const rule = KEY_PREFIX_RULES[field];
+  if (rule && !value.startsWith(rule.prefix)) {
+    logger.warn(
+      `${rule.label} does not start with expected prefix "${rule.prefix}" — it may be invalid`,
+    );
+  }
+  return true;
+}
+
 export function loadSecrets(projectPath: string): ResolvedSecrets {
   // 1. Global .env
   const globalEnv = parseEnvFile(envFilePath());
@@ -74,13 +110,22 @@ export function loadSecrets(projectPath: string): ResolvedSecrets {
     }
   }
 
-  // 4. Map env var names to config field names
+  // 4. Map env var names to config field names, validating values
   const secrets: ResolvedSecrets = {};
   for (const [field, envVar] of Object.entries(SECRET_FIELDS)) {
-    const value = merged[envVar];
-    if (value) {
-      (secrets as Record<string, string>)[field] = value;
+    const raw = merged[envVar];
+    if (raw == null) continue;
+
+    const value = raw.trim();
+    if (value.length === 0) continue;
+
+    if (isPlaceholder(value)) {
+      logger.warn(`Skipping %s: value looks like a placeholder`, envVar);
+      continue;
     }
+
+    validateSecretFormat(field as keyof ResolvedSecrets, value);
+    (secrets as Record<string, string>)[field] = value;
   }
 
   return secrets;

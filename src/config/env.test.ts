@@ -16,6 +16,7 @@ import {
   extractSecrets,
   SECRET_FIELDS,
 } from "./env";
+import { vi } from "vitest";
 
 const TEST_HOME = join("/tmp", `pergentic-env-test-${process.pid}`);
 const TEST_PROJECT = join("/tmp", `pergentic-env-project-${process.pid}`);
@@ -123,6 +124,43 @@ describe("loadSecrets", () => {
     process.env.PERGENTIC_GITHUB_TOKEN = "ghp_env";
     const secrets = loadSecrets(TEST_PROJECT);
     expect(secrets.githubToken).toBe("ghp_env");
+  });
+
+  it("skips empty and whitespace-only values", () => {
+    writeFileSync(
+      join(TEST_PROJECT, ".pergentic", ".env"),
+      [
+        "PERGENTIC_ANTHROPIC_API_KEY=",
+        "PERGENTIC_GITHUB_TOKEN=   ",
+      ].join("\n") + "\n",
+    );
+    const secrets = loadSecrets(TEST_PROJECT);
+    expect(secrets.anthropicApiKey).toBeUndefined();
+    expect(secrets.githubToken).toBeUndefined();
+  });
+
+  it("trims whitespace from secret values", () => {
+    writeFileSync(
+      join(TEST_PROJECT, ".pergentic", ".env"),
+      "PERGENTIC_ANTHROPIC_API_KEY=  sk-ant-trimmed  \n",
+    );
+    const secrets = loadSecrets(TEST_PROJECT);
+    expect(secrets.anthropicApiKey).toBe("sk-ant-trimmed");
+  });
+
+  it("skips placeholder values", () => {
+    writeFileSync(
+      join(TEST_PROJECT, ".pergentic", ".env"),
+      [
+        "PERGENTIC_ANTHROPIC_API_KEY=your-api-key-here",
+        "PERGENTIC_GITHUB_TOKEN=<your-token>",
+        "PERGENTIC_LINEAR_API_KEY=CHANGEME",
+      ].join("\n") + "\n",
+    );
+    const secrets = loadSecrets(TEST_PROJECT);
+    expect(secrets.anthropicApiKey).toBeUndefined();
+    expect(secrets.githubToken).toBeUndefined();
+    expect(secrets.linearApiKey).toBeUndefined();
   });
 
   it("loads multiple secret fields", () => {
