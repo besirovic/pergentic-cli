@@ -1,5 +1,6 @@
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { safeJsonParse } from "../utils/fs";
 
 const HISTORY_FILE = ".claude-history.json";
 
@@ -22,9 +23,7 @@ function historyPath(worktreePath: string): string {
 }
 
 export function loadHistory(worktreePath: string): FeedbackHistory | null {
-  const path = historyPath(worktreePath);
-  if (!existsSync(path)) return null;
-  return JSON.parse(readFileSync(path, "utf-8")) as FeedbackHistory;
+  return safeJsonParse<FeedbackHistory | null>(historyPath(worktreePath), null);
 }
 
 export function saveHistory(

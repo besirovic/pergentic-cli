@@ -1,7 +1,6 @@
-import { readFileSync, existsSync } from "node:fs";
 import { statsFilePath } from "../config/paths";
 import { ensureGlobalConfigDir } from "../config/loader";
-import { atomicWriteFile } from "../utils/fs";
+import { atomicWriteFile, safeJsonParse } from "../utils/fs";
 
 export interface TaskCostEntry {
   taskId: string;
@@ -29,11 +28,7 @@ interface StatsFile {
 }
 
 function loadStats(): StatsFile {
-  const path = statsFilePath();
-  if (!existsSync(path)) {
-    return { taskHistory: [], dailyStats: {} };
-  }
-  return JSON.parse(readFileSync(path, "utf-8")) as StatsFile;
+  return safeJsonParse<StatsFile>(statsFilePath(), { taskHistory: [], dailyStats: {} });
 }
 
 function saveStats(stats: StatsFile): void {
