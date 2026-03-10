@@ -255,7 +255,13 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
 
       const handle = spawnAgentAndWait(agentCmd, worktree.path, agentEnv, timeoutMs);
       const activeEntry = this.active.get(task.id);
-      if (activeEntry) activeEntry.process = handle.process;
+      if (activeEntry) {
+        activeEntry.process = handle.process;
+      } else {
+        // Task was cancelled during spawn setup — kill immediately
+        handle.process.kill("SIGTERM");
+        return;
+      }
       result = await handle.result;
 
       // If task was cancelled during execution, do not retry
@@ -275,7 +281,6 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       }
     }
 
-    this.active.delete(task.id);
     const duration = Math.floor((Date.now() - startTime) / 1000);
 
     if (result.exitCode === 0) {
@@ -292,7 +297,10 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
               task, projectConfig, projectName, worktree, agentEnv,
               agentOptions, agent, duration, commands, verifyConfig?.maxRetries ?? 3,
             );
-            if (!verified) return;
+            if (!verified) {
+              this.active.delete(task.id);
+              return;
+            }
           }
 
           // Commit → push → PR
@@ -333,6 +341,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
             worktreePath: worktree.path,
           });
           logger.info({ taskId: task.id, duration }, "Task completed successfully");
+          this.active.delete(task.id);
           return;
         }
 
@@ -359,6 +368,8 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
         "Task failed",
       );
     }
+
+    this.active.delete(task.id);
   }
 
   private async runVerificationLoop(
@@ -423,7 +434,13 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       const fixCmd = agent.buildCommand(fixPrompt, worktree.path, agentOptions);
       const fixHandle = spawnAgentAndWait(fixCmd, worktree.path, agentEnv);
       const fixActiveEntry = this.active.get(task.id);
-      if (fixActiveEntry) fixActiveEntry.process = fixHandle.process;
+      if (fixActiveEntry) {
+        fixActiveEntry.process = fixHandle.process;
+      } else {
+        // Task was cancelled during verification fix — kill immediately
+        fixHandle.process.kill("SIGTERM");
+        return false;
+      }
       const fixResult = await fixHandle.result;
 
       if (fixResult.exitCode !== 0) {
