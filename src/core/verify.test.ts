@@ -40,6 +40,18 @@ describe("execCommand", () => {
 		const result = await execCommand("echo err >&2", "/tmp", {});
 		expect(result.output).toContain("err");
 	});
+
+	it("sets timedOut to false on normal completion", async () => {
+		const result = await execCommand("echo ok", "/tmp", {});
+		expect(result.timedOut).toBe(false);
+	});
+
+	it("kills command and sets timedOut on timeout", async () => {
+		const result = await execCommand("sleep 60", "/tmp", {}, 200);
+		expect(result.timedOut).toBe(true);
+		expect(result.success).toBe(false);
+		expect(result.output).toContain("timed out");
+	}, 10_000);
 });
 
 describe("spawnAgentAndWait output buffering", () => {

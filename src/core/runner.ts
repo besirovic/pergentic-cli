@@ -311,10 +311,14 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
           const commands = verifyConfig?.commands ?? [];
 
           if (commands.length > 0) {
+            const commandTimeoutMs = verifyConfig?.commandTimeout
+              ? verifyConfig.commandTimeout * 1000
+              : undefined;
             const verified = await this.deps.verification.runVerificationLoop(
               task, projectConfig, projectName, worktree, agentEnv,
               agentOptions, agent, duration, commands, verifyConfig?.maxRetries ?? 3,
               () => this.active.get(task.id),
+              commandTimeoutMs,
             );
             if (!verified) {
               this.active.delete(task.id);

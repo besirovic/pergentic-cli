@@ -122,10 +122,14 @@ const FeedbackConfigSchema = z.object({
 	maxRounds: z.number().default(5),
 });
 
+const DEFAULT_VERIFICATION_COMMAND_TIMEOUT_SECONDS = 300;
+
 const VerificationConfigSchema = z.object({
 	/** Shell commands executed via `sh -c` after the agent completes. */
 	commands: z.array(z.string()).default([]),
 	maxRetries: z.number().min(0).max(20).default(3),
+	/** Per-command timeout in seconds (default: 300 = 5 minutes). */
+	commandTimeout: z.number().min(10).default(DEFAULT_VERIFICATION_COMMAND_TIMEOUT_SECONDS).optional(),
 });
 
 const AgentRetryConfigSchema = z.object({

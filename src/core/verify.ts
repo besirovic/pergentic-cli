@@ -13,6 +13,7 @@ export interface VerificationResult {
 interface ExecResult {
   success: boolean;
   output: string;
+  timedOut: boolean;
 }
 
 /**
@@ -27,6 +28,7 @@ export function execCommand(
   cmd: string,
   cwd: string,
   env: Record<string, string | undefined>,
+  timeoutMs?: number,
 ): Promise<ExecResult> {
   return new Promise((resolve) => {
     const child = spawn("sh", ["-c", cmd], {
@@ -36,21 +38,42 @@ export function execCommand(
     });
 
     const chunks: Buffer[] = [];
+    let timedOut = false;
+    let termTimer: ReturnType<typeof setTimeout> | undefined;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+
+    if (timeoutMs) {
+      termTimer = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGTERM");
+        killTimer = setTimeout(() => {
+          child.kill("SIGKILL");
+        }, SIGKILL_DELAY_MS);
+        killTimer.unref();
+      }, timeoutMs);
+    }
 
     child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
     child.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk));
 
     child.on("close", (code) => {
+      if (termTimer) clearTimeout(termTimer);
+      if (killTimer) clearTimeout(killTimer);
+      const output = Buffer.concat(chunks).toString("utf-8").trim();
       resolve({
-        success: code === 0,
-        output: Buffer.concat(chunks).toString("utf-8").trim(),
+        success: !timedOut && code === 0,
+        output: timedOut ? `Command timed out after ${Math.floor((timeoutMs ?? 0) / 1000)}s\n${output}` : output,
+        timedOut,
       });
     });
 
     child.on("error", (err) => {
+      if (termTimer) clearTimeout(termTimer);
+      if (killTimer) clearTimeout(killTimer);
       resolve({
         success: false,
         output: err.message,
+        timedOut,
       });
     });
   });
@@ -60,11 +83,12 @@ export async function runVerificationCommands(
   worktreePath: string,
   commands: string[],
   env: Record<string, string | undefined>,
+  commandTimeoutMs?: number,
 ): Promise<VerificationResult> {
   for (const cmd of commands) {
     logger.info({ cmd, cwd: worktreePath }, "Running verification command");
 
-    const result = await execCommand(cmd, worktreePath, env);
+    const result = await execCommand(cmd, worktreePath, env, commandTimeoutMs);
 
     if (!result.success) {
       return {

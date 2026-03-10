@@ -79,6 +79,7 @@ export interface VerificationService {
     commands: string[],
     maxRetries: number,
     getActiveTask: () => { process: ChildProcess | null } | undefined,
+    commandTimeoutMs?: number,
   ): Promise<boolean>;
 }
 

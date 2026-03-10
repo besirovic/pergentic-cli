@@ -39,12 +39,13 @@ export class VerificationRunner {
     commands: string[],
     maxRetries: number,
     getActiveTask: () => ActiveTaskRef | undefined,
+    commandTimeoutMs?: number,
   ): Promise<boolean> {
     const { payload } = task;
     const ctx: TaskContext = { taskId: payload.taskId, title: payload.title, project: projectName };
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const verifyResult = await runVerificationCommands(worktree.path, commands, agentEnv);
+      const verifyResult = await runVerificationCommands(worktree.path, commands, agentEnv, commandTimeoutMs);
 
       if (verifyResult.success) return true;
 
