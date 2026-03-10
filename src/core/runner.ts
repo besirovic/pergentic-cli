@@ -1,12 +1,9 @@
 import { type ChildProcess } from "node:child_process";
 import { resolveAgent } from "../agents/resolve-agent";
 import { createWorktree, ensureRepoClone, type WorktreeInfo } from "./worktree";
-import { commitAll, pushBranch, createPR, amendAndForcePush, pullBranch } from "./git";
+import { amendAndForcePush, pullBranch } from "./git";
 import { initHistory, addFeedbackRound, buildFeedbackPrompt, loadHistory } from "./feedback";
-import { postTaskComments, postVerificationFailureComment } from "./comments";
-import { spawnAgentAndWait, runVerificationCommands, buildVerificationFixPrompt, execCommand } from "./verify";
 import { TaskLifecycle, type TaskContext } from "./task-lifecycle";
-import { buildPRDetails } from "./pr-builder";
 import { logger } from "../utils/logger";
 import { TypedEventEmitter } from "../types/typed-emitter";
 import type { Task } from "./queue";
@@ -14,13 +11,15 @@ import { AgentName } from "../config/schema";
 import type { GlobalConfig, ProjectConfig } from "../config/schema";
 import { buildBranchName, buildBranchTemplateVars, DEFAULT_BRANCH_TEMPLATE } from "./branch-name";
 import { buildPromptFromTemplate } from "./prompt-template";
-import { readAgentPRBody } from "./pr-template";
 import type { SpawnResult } from "../utils/process";
+import { spawnAgentAndWait } from "./verify";
 import { cancellableSleep } from "../utils/sleep";
-import simpleGit from "simple-git";
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { repoDir } from "../config/paths";
+import { VerificationRunner } from "./verification-runner";
+import { PRCreationService } from "./pr-service";
+import { ScheduledCommandRunner } from "./scheduled-runner";
 
 const MAX_ERROR_SNIPPET_CHARS = 2000;
 const MAX_ERROR_DETAIL_CHARS = 500;
@@ -58,12 +57,18 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
   private maxConcurrent: number;
   private globalConfig: GlobalConfig;
   private lifecycle: TaskLifecycle;
+  private verificationRunner: VerificationRunner;
+  private prService: PRCreationService;
+  private scheduledRunner: ScheduledCommandRunner;
 
   constructor(config: RunnerConfig) {
     super();
     this.maxConcurrent = config.maxConcurrent;
     this.globalConfig = config.globalConfig;
     this.lifecycle = new TaskLifecycle(config.globalConfig);
+    this.prService = new PRCreationService();
+    this.verificationRunner = new VerificationRunner(this.lifecycle);
+    this.scheduledRunner = new ScheduledCommandRunner(this.lifecycle, this.prService);
   }
 
   async run(
@@ -318,45 +323,22 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
           const commands = verifyConfig?.commands ?? [];
 
           if (commands.length > 0) {
-            const verified = await this.runVerificationLoop(
+            const verified = await this.verificationRunner.runVerificationLoop(
               task, projectConfig, projectName, worktree, agentEnv,
               agentOptions, agent, duration, commands, verifyConfig?.maxRetries ?? 3,
+              () => this.active.get(task.id),
             );
             if (!verified) {
               this.active.delete(task.id);
+              this.emit("taskFailed", task, new Error("Verification failed"));
               return;
             }
           }
 
           // Commit → push → PR
-          const agentBody = await readAgentPRBody(worktree.path);
-          const prDetails = buildPRDetails(task, projectConfig, agentBody);
-          await commitAll(worktree.path, prDetails.commitMessage);
-          await pushBranch(worktree.path, worktree.branch);
-
-          const pr = await createPR(worktree.path, {
-            repo: projectConfig.repo,
-            branch: worktree.branch,
-            baseBranch: projectConfig.branch,
-            title: prDetails.title,
-            body: prDetails.body,
-            labels: projectConfig.pr?.labels,
-            reviewers: projectConfig.pr?.reviewers,
-            githubToken: projectConfig.githubToken ?? "",
-          });
+          const pr = await this.prService.createPRFromWorktree(task, projectConfig, worktree);
 
           await this.lifecycle.recordSuccess(ctx, duration, pr.url, projectConfig);
-
-          await postTaskComments({
-            worktreePath: worktree.path,
-            repo: projectConfig.repo,
-            prUrl: pr.url,
-            prNumber: pr.number,
-            taskTitle: payload.title,
-            taskId: payload.taskId,
-            projectConfig,
-            task,
-          });
 
           this.emit("taskCompleted", task, {
             duration,
@@ -395,88 +377,6 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
     }
 
     this.active.delete(task.id);
-  }
-
-  private async runVerificationLoop(
-    task: Task,
-    projectConfig: ProjectConfig,
-    projectName: string,
-    worktree: WorktreeInfo,
-    agentEnv: Record<string, string | undefined>,
-    agentOptions: {
-      instructions?: string;
-      allowedTools?: string[];
-      maxCostPerTask?: number;
-      model?: string;
-    },
-    agent: ReturnType<typeof resolveAgent>,
-    duration: number,
-    commands: string[],
-    maxRetries: number,
-  ): Promise<boolean> {
-    const { payload } = task;
-    const ctx: TaskContext = { taskId: payload.taskId, title: payload.title, project: projectName };
-
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const verifyResult = await runVerificationCommands(worktree.path, commands, agentEnv);
-
-      if (verifyResult.success) return true;
-
-      if (attempt === maxRetries) {
-        logger.error(
-          { taskId: task.id, failedCommand: verifyResult.failedCommand, retries: attempt },
-          "Verification failed after max retries",
-        );
-
-        const error = `Verification command "${verifyResult.failedCommand}" failed after ${attempt} retries.\n\nOutput:\n${verifyResult.output?.slice(-1000)}`;
-        await this.lifecycle.recordFailure(ctx, duration, `Verification failed: ${verifyResult.failedCommand}`, projectConfig);
-
-        await postVerificationFailureComment({
-          task,
-          projectConfig,
-          failedCommand: verifyResult.failedCommand!,
-          output: verifyResult.output ?? "",
-          retries: attempt,
-        });
-
-        this.emit("taskFailed", task, new Error("Verification failed"));
-        return false;
-      }
-
-      // Re-invoke agent to fix
-      logger.info(
-        { taskId: task.id, retry: attempt + 1, maxRetries, failedCommand: verifyResult.failedCommand },
-        "Re-invoking agent to fix verification failure",
-      );
-
-      const fixPrompt = buildVerificationFixPrompt(
-        verifyResult.failedCommand!,
-        verifyResult.output ?? "",
-        attempt + 1,
-        maxRetries,
-      );
-
-      const fixCmd = agent.buildCommand(fixPrompt, worktree.path, agentOptions);
-      const fixHandle = spawnAgentAndWait(fixCmd, worktree.path, agentEnv);
-      const fixActiveEntry = this.active.get(task.id);
-      if (fixActiveEntry) {
-        fixActiveEntry.process = fixHandle.process;
-      } else {
-        // Task was cancelled during verification fix — kill immediately
-        fixHandle.process.kill("SIGTERM");
-        return false;
-      }
-      const fixResult = await fixHandle.result;
-
-      if (fixResult.exitCode !== 0) {
-        logger.warn(
-          { taskId: task.id, exitCode: fixResult.exitCode, retry: attempt + 1 },
-          "Fix agent exited with non-zero code",
-        );
-      }
-    }
-
-    return false;
   }
 
   isActive(taskId: string): boolean {
@@ -541,9 +441,16 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
     const ctx: TaskContext = { taskId: payload.taskId, title: payload.title, project: projectName };
     this.lifecycle.recordStart(ctx);
 
-    this.executeScheduledCommand(
+    this.scheduledRunner.execute(
       task, projectConfig, projectName, worktree, command, startTime,
-    ).catch((err) => {
+    ).then((result) => {
+      this.active.delete(task.id);
+      if (result.success) {
+        this.emit("taskCompleted", task);
+      } else {
+        this.emit("taskFailed", task, new Error("Scheduled command failed"));
+      }
+    }).catch((err) => {
       try {
         logger.error({ taskId: task.id, err }, "Unhandled error in scheduled command execution");
       } catch {
@@ -554,71 +461,6 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
     });
 
     return true;
-  }
-
-  private async executeScheduledCommand(
-    task: Task,
-    projectConfig: ProjectConfig,
-    projectName: string,
-    worktree: WorktreeInfo,
-    command: string,
-    startTime: number,
-  ): Promise<void> {
-    const { payload } = task;
-    const ctx: TaskContext = { taskId: payload.taskId, title: payload.title, project: projectName };
-    const agentEnv: Record<string, string | undefined> = {
-      ...(projectConfig.githubToken && { GITHUB_TOKEN: projectConfig.githubToken }),
-    };
-
-    try {
-      const result = await execCommand(command, worktree.path, agentEnv);
-      this.active.delete(task.id);
-      const duration = Math.floor((Date.now() - startTime) / 1000);
-
-      if (!result.success) {
-        await this.lifecycle.recordFailure(ctx, duration, `Command failed: ${result.output.slice(-1000)}`, projectConfig);
-        this.emit("taskFailed", task, new Error("Scheduled command failed"));
-        return;
-      }
-
-      // Check for changes
-      const git = simpleGit(worktree.path);
-      const status = await git.status();
-
-      if (status.files.length === 0) {
-        logger.info({ taskId: task.id }, "Scheduled command produced no changes, skipping PR");
-        this.emit("taskCompleted", task);
-        return;
-      }
-
-      // Commit, push, create PR
-      const scheduledAgentBody = await readAgentPRBody(worktree.path);
-      const prDetails = buildPRDetails(task, projectConfig, scheduledAgentBody);
-      await commitAll(worktree.path, prDetails.commitMessage);
-      await pushBranch(worktree.path, worktree.branch);
-
-      const pr = await createPR(worktree.path, {
-        repo: projectConfig.repo,
-        branch: worktree.branch,
-        baseBranch: projectConfig.branch,
-        title: prDetails.title,
-        body: prDetails.body,
-        labels: projectConfig.pr?.labels,
-        reviewers: projectConfig.pr?.reviewers,
-        githubToken: projectConfig.githubToken ?? "",
-      });
-
-      await this.lifecycle.recordSuccess(ctx, duration, pr.url, projectConfig);
-
-      this.emit("taskCompleted", task);
-      logger.info({ taskId: task.id, duration, prUrl: pr.url }, "Scheduled command task completed");
-    } catch (err) {
-      this.active.delete(task.id);
-      const duration = Math.floor((Date.now() - startTime) / 1000);
-      this.emit("taskFailed", task, err);
-      logger.error({ taskId: task.id, err }, "Scheduled command execution failed");
-      await this.lifecycle.recordFailure(ctx, duration, String(err), projectConfig);
-    }
   }
 
   async waitForAll(timeoutMs: number = 300_000): Promise<void> {
