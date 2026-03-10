@@ -296,7 +296,12 @@ async function wizardStep3ConfigureKeys(
 
 		if (fixedProvider) {
 			// Fixed-provider agent (claude-code → anthropic, codex → openai)
-			const providerDef = PROVIDERS.find((p) => p.value === fixedProvider)!;
+			const providerDef = PROVIDERS.find((p) => p.value === fixedProvider);
+			if (!providerDef) {
+				console.error(`Unknown provider: ${fixedProvider}`);
+				process.exitCode = 1;
+				return;
+			}
 			config.agentProviders[agent] = fixedProvider;
 			await promptForApiKey(agent, providerDef, config);
 		} else if (MULTI_PROVIDER_AGENTS.includes(agent)) {
@@ -315,7 +320,12 @@ async function wizardStep3ConfigureKeys(
 
 			config.agentProviders[agent] = provider;
 
-			const providerDef = PROVIDERS.find((p) => p.value === provider)!;
+			const providerDef = PROVIDERS.find((p) => p.value === provider);
+			if (!providerDef) {
+				console.error(`Unknown provider: ${provider}`);
+				process.exitCode = 1;
+				return;
+			}
 			if (providerDef.keyField) {
 				await promptForApiKey(agent, providerDef, config);
 			} else {
