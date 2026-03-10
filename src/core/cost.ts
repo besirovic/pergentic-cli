@@ -1,6 +1,6 @@
 import { statsFilePath } from "../config/paths";
 import { ensureGlobalConfigDir } from "../config/loader";
-import { atomicWriteFile, safeJsonParse } from "../utils/fs";
+import { atomicWriteFileAsync, safeJsonParseAsync } from "../utils/fs";
 
 export interface TaskCostEntry {
   taskId: string;
@@ -27,13 +27,13 @@ interface StatsFile {
   dailyStats: Record<string, DailyStats>;
 }
 
-function loadStats(): StatsFile {
-  return safeJsonParse<StatsFile>(statsFilePath(), { taskHistory: [], dailyStats: {} });
+async function loadStats(): Promise<StatsFile> {
+  return safeJsonParseAsync<StatsFile>(statsFilePath(), { taskHistory: [], dailyStats: {} });
 }
 
-function saveStats(stats: StatsFile): void {
+async function saveStats(stats: StatsFile): Promise<void> {
   ensureGlobalConfigDir();
-  atomicWriteFile(statsFilePath(), JSON.stringify(stats, null, 2));
+  await atomicWriteFileAsync(statsFilePath(), JSON.stringify(stats, null, 2));
 }
 
 function todayKey(): string {
@@ -53,15 +53,15 @@ function ensureDay(stats: StatsFile, date: string): DailyStats {
   return stats.dailyStats[date];
 }
 
-export function recordTaskCost(
+export async function recordTaskCost(
   taskId: string,
   cost: number,
   duration: number,
   createdPR: boolean,
   failed: boolean,
   extra?: { project?: string; title?: string; prUrl?: string; error?: string },
-): void {
-  const stats = loadStats();
+): Promise<void> {
+  const stats = await loadStats();
   const date = todayKey();
   const day = ensureDay(stats, date);
 
@@ -79,18 +79,18 @@ export function recordTaskCost(
   if (createdPR) day.prs += 1;
   if (failed) day.failed += 1;
 
-  saveStats(stats);
+  await saveStats(stats);
 }
 
-export function getTaskHistory(): TaskCostEntry[] {
-  const stats = loadStats();
+export async function getTaskHistory(): Promise<TaskCostEntry[]> {
+  const stats = await loadStats();
   return stats.taskHistory;
 }
 
 export const STATS_RETENTION_DAYS = 90;
 
-export function pruneStats(maxDays: number = STATS_RETENTION_DAYS): void {
-  const stats = loadStats();
+export async function pruneStats(maxDays: number = STATS_RETENTION_DAYS): Promise<void> {
+  const stats = await loadStats();
   const cutoff = Date.now() - maxDays * 24 * 60 * 60 * 1000;
 
   stats.taskHistory = stats.taskHistory.filter(
@@ -104,5 +104,5 @@ export function pruneStats(maxDays: number = STATS_RETENTION_DAYS): void {
     }
   }
 
-  saveStats(stats);
+  await saveStats(stats);
 }

@@ -20,41 +20,41 @@ describe("feedback", () => {
 		if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
 	});
 
-	it("initializes history", () => {
-		const history = initHistory(TEST_DIR, "TASK-1", "Build the feature");
+	it("initializes history", async () => {
+		const history = await initHistory(TEST_DIR, "TASK-1", "Build the feature");
 		expect(history.taskId).toBe("TASK-1");
 		expect(history.originalDescription).toBe("Build the feature");
 		expect(history.feedbackRounds).toEqual([]);
 	});
 
-	it("loads saved history", () => {
-		initHistory(TEST_DIR, "TASK-1", "Build the feature");
-		const loaded = loadHistory(TEST_DIR);
+	it("loads saved history", async () => {
+		await initHistory(TEST_DIR, "TASK-1", "Build the feature");
+		const loaded = await loadHistory(TEST_DIR);
 		expect(loaded).not.toBeNull();
 		expect(loaded!.taskId).toBe("TASK-1");
 	});
 
-	it("returns null for missing history", () => {
-		expect(loadHistory(TEST_DIR)).toBeNull();
+	it("returns null for missing history", async () => {
+		expect(await loadHistory(TEST_DIR)).toBeNull();
 	});
 
-	it("adds feedback rounds", () => {
-		initHistory(TEST_DIR, "TASK-1", "Build the feature");
-		const updated = addFeedbackRound(TEST_DIR, "Fix the mobile layout");
+	it("adds feedback rounds", async () => {
+		await initHistory(TEST_DIR, "TASK-1", "Build the feature");
+		const updated = await addFeedbackRound(TEST_DIR, "Fix the mobile layout");
 		expect(updated.feedbackRounds).toHaveLength(1);
 		expect(updated.feedbackRounds[0].round).toBe(1);
 		expect(updated.feedbackRounds[0].comment).toBe("Fix the mobile layout");
 
-		const updated2 = addFeedbackRound(TEST_DIR, "Add a spinner");
+		const updated2 = await addFeedbackRound(TEST_DIR, "Add a spinner");
 		expect(updated2.feedbackRounds).toHaveLength(2);
 		expect(updated2.feedbackRounds[1].round).toBe(2);
 	});
 
-	it("builds feedback prompt with full history", () => {
-		const history = initHistory(TEST_DIR, "TASK-1", "Add billing");
-		addFeedbackRound(TEST_DIR, "Fix mobile");
+	it("builds feedback prompt with full history", async () => {
+		const history = await initHistory(TEST_DIR, "TASK-1", "Add billing");
+		await addFeedbackRound(TEST_DIR, "Fix mobile");
 
-		const updated = loadHistory(TEST_DIR)!;
+		const updated = (await loadHistory(TEST_DIR))!;
 		const prompt = buildFeedbackPrompt(
 			updated,
 			"Add spinner",

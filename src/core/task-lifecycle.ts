@@ -16,8 +16,8 @@ export class TaskLifecycle {
     this.globalConfig = globalConfig;
   }
 
-  recordStart(ctx: TaskContext): void {
-    recordEvent({
+  async recordStart(ctx: TaskContext): Promise<void> {
+    await recordEvent({
       timestamp: new Date().toISOString(),
       type: "taskStarted",
       taskId: ctx.taskId,
@@ -32,13 +32,13 @@ export class TaskLifecycle {
     prUrl: string,
     projectConfig?: ProjectConfig,
   ): Promise<void> {
-    recordTaskCost(ctx.taskId, 0, duration, true, false, {
+    await recordTaskCost(ctx.taskId, 0, duration, true, false, {
       project: ctx.project,
       title: ctx.title,
       prUrl,
     });
 
-    recordEvent({
+    await recordEvent({
       timestamp: new Date().toISOString(),
       type: "prCreated",
       taskId: ctx.taskId,
@@ -66,13 +66,13 @@ export class TaskLifecycle {
     projectConfig?: ProjectConfig,
     retriesAttempted?: number,
   ): Promise<void> {
-    recordTaskCost(ctx.taskId, 0, duration, false, true, {
+    await recordTaskCost(ctx.taskId, 0, duration, false, true, {
       project: ctx.project,
       title: ctx.title,
       error,
     });
 
-    recordEvent({
+    await recordEvent({
       timestamp: new Date().toISOString(),
       type: "taskFailed",
       taskId: ctx.taskId,

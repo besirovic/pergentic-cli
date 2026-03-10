@@ -217,7 +217,7 @@ export class Poller {
         const started = await this.runner.run(task, projectConfig, projectPath);
         if (started) {
           const ledgerType = task.type === "feedback" ? "comment" : "task";
-          this.ledger.markDispatched(task.id, ledgerType);
+          await this.ledger.markDispatched(task.id, ledgerType);
         } else {
           this.queue.markFailed(task.id);
           logger.error({ taskId: task.id }, "Task failed to start, will not retry");

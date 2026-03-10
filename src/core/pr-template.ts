@@ -1,4 +1,5 @@
-import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { readFile, readdir } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import { logger } from "../utils/logger";
 
@@ -27,8 +28,8 @@ const MAX_TEMPLATE_BYTES = 10 * 1024;
  * Read a template file with size guard.
  * Returns the content truncated to MAX_TEMPLATE_BYTES if necessary.
  */
-function readSafeTemplate(filePath: string): string {
-	const content = readFileSync(filePath, "utf-8");
+async function readSafeTemplate(filePath: string): Promise<string> {
+	const content = await readFile(filePath, "utf-8");
 	if (Buffer.byteLength(content, "utf-8") > MAX_TEMPLATE_BYTES) {
 		logger.warn(
 			{ path: filePath, bytes: Buffer.byteLength(content, "utf-8"), maxBytes: MAX_TEMPLATE_BYTES },
@@ -47,10 +48,10 @@ function readSafeTemplate(filePath: string): string {
  * @param explicitPath - Optional user-configured template path (relative to repo root)
  * @returns The template contents, or null if none found
  */
-export function detectPRTemplate(
+export async function detectPRTemplate(
 	repoRoot: string,
 	explicitPath?: string,
-): string | null {
+): Promise<string | null> {
 	// Check explicit path first
 	if (explicitPath) {
 		const full = resolve(repoRoot, explicitPath);
@@ -84,7 +85,7 @@ export function detectPRTemplate(
 	const templateDir = join(repoRoot, ".github", "PULL_REQUEST_TEMPLATE");
 	if (existsSync(templateDir)) {
 		try {
-			const files = readdirSync(templateDir)
+			const files = (await readdir(templateDir))
 				.filter((f) => f.endsWith(".md"))
 				.sort();
 			if (files.length > 0) {
@@ -106,11 +107,11 @@ export function detectPRTemplate(
  * @param worktreePath - Path to the worktree
  * @returns The agent-generated PR body, or null if not found
  */
-export function readAgentPRBody(worktreePath: string): string | null {
+export async function readAgentPRBody(worktreePath: string): Promise<string | null> {
 	const full = join(worktreePath, PR_BODY_OUTPUT_FILE);
 	if (!existsSync(full)) return null;
 
-	const content = readFileSync(full, "utf-8").trim();
+	const content = (await readFile(full, "utf-8")).trim();
 	if (!content) return null;
 
 	logger.debug("Using agent-generated PR body");

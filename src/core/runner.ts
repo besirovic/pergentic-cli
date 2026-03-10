@@ -127,18 +127,18 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       if (task.type === "feedback") {
         await pullBranch(worktree.path, worktree.branch);
         const history =
-          loadHistory(worktree.path) ??
-          initHistory(worktree.path, payload.taskId, payload.description);
+          (await loadHistory(worktree.path)) ??
+          (await initHistory(worktree.path, payload.taskId, payload.description));
         const comment = "comment" in payload ? payload.comment ?? "" : "";
-        addFeedbackRound(worktree.path, comment);
+        await addFeedbackRound(worktree.path, comment);
         prompt = buildFeedbackPrompt(history, comment);
       } else if (task.type === "scheduled" && "scheduledCommand" in payload && payload.scheduledCommand) {
         return this.runScheduledCommand(task, projectConfig, projectName, worktree, startTime);
       } else if (task.type === "scheduled" && !("scheduledCommand" in payload && payload.scheduledCommand)) {
         prompt = payload.description;
       } else {
-        initHistory(worktree.path, payload.taskId, payload.description);
-        prompt = buildPromptFromTemplate({
+        await initHistory(worktree.path, payload.taskId, payload.description);
+        prompt = await buildPromptFromTemplate({
           projectPath,
           task,
           projectName,
@@ -180,7 +180,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       this.active.set(task.id, activeTask);
 
       this.emit("taskStarted", task);
-      this.lifecycle.recordStart(ctx);
+      await this.lifecycle.recordStart(ctx);
 
       this.executeTask(
         task, projectConfig, projectName, worktree, agentCmd, agentEnv,
@@ -304,7 +304,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
           }
 
           // Commit → push → PR
-          const agentBody = readAgentPRBody(worktree.path);
+          const agentBody = await readAgentPRBody(worktree.path);
           const prDetails = buildPRDetails(task, projectConfig, agentBody);
           await commitAll(worktree.path, prDetails.commitMessage);
           await pushBranch(worktree.path, worktree.branch);
@@ -559,7 +559,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       }
 
       // Commit, push, create PR
-      const scheduledAgentBody = readAgentPRBody(worktree.path);
+      const scheduledAgentBody = await readAgentPRBody(worktree.path);
       const prDetails = buildPRDetails(task, projectConfig, scheduledAgentBody);
       await commitAll(worktree.path, prDetails.commitMessage);
       await pushBranch(worktree.path, worktree.branch);

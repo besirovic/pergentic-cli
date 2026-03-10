@@ -1,4 +1,5 @@
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { PROMPT_TEMPLATE_VARS, DEFAULT_PROMPT_TEMPLATE, type PromptTemplateVar } from "./prompt-template-constants";
 import { promptTemplatePath } from "../config/paths";
 import type { Task } from "./queue";
@@ -64,14 +65,14 @@ export function resolveTemplate(
  * Validates template variables on first load and logs warnings for unknown vars.
  * Returns null if file doesn't exist.
  */
-export function loadPromptTemplate(
+export async function loadPromptTemplate(
 	projectPath: string,
 	filename: string,
-): string | null {
+): Promise<string | null> {
 	const fullPath = promptTemplatePath(projectPath, filename);
 	if (!existsSync(fullPath)) return null;
 
-	const template = readFileSync(fullPath, "utf-8");
+	const template = await readFile(fullPath, "utf-8");
 
 	if (!validatedPaths.has(fullPath)) {
 		validatedPaths.add(fullPath);
@@ -111,14 +112,14 @@ export interface BuildPromptOptions {
  * prepend systemContext if configured.
  * Falls back to default template when no template file exists.
  */
-export function buildPromptFromTemplate(opts: BuildPromptOptions): string {
+export async function buildPromptFromTemplate(opts: BuildPromptOptions): Promise<string> {
 	const { projectPath, task, projectName, projectConfig, agentName, worktreePath } = opts;
 	const templateFilename = projectConfig.promptTemplate?.path ?? "PROMPT.md";
-	const template = loadPromptTemplate(projectPath, templateFilename) ?? DEFAULT_PROMPT_TEMPLATE;
+	const template = (await loadPromptTemplate(projectPath, templateFilename)) ?? DEFAULT_PROMPT_TEMPLATE;
 
 	// Detect PR template from worktree
 	const repoRoot = worktreePath ?? projectPath;
-	const prTemplateContent = detectPRTemplate(repoRoot, projectConfig.pr?.templatePath);
+	const prTemplateContent = await detectPRTemplate(repoRoot, projectConfig.pr?.templatePath);
 	const prTemplateSection = prTemplateContent
 		? buildPRTemplatePromptSection(prTemplateContent)
 		: "";

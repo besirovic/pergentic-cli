@@ -35,8 +35,8 @@ function listView(entries: TaskCostEntry[], limit: number, project?: string): vo
 	}
 }
 
-function detailView(taskId: string): void {
-	const entries = getTaskHistory().filter((e) => e.taskId === taskId);
+async function detailView(taskId: string): Promise<void> {
+	const entries = (await getTaskHistory()).filter((e) => e.taskId === taskId);
 
 	if (entries.length === 0) {
 		console.error(`No history found for task "${taskId}".`);
@@ -65,10 +65,10 @@ export async function history(opts: {
 	limit: string;
 }): Promise<void> {
 	if (opts.taskId) {
-		detailView(opts.taskId);
+		await detailView(opts.taskId);
 		return;
 	}
 
-	const entries = getTaskHistory();
+	const entries = await getTaskHistory();
 	listView(entries, parseInt(opts.limit, 10) || 20, opts.project);
 }

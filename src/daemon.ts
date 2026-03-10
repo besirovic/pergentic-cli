@@ -1,7 +1,8 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { createLogger } from "./utils/logger";
 import { stateFilePath, statsFilePath } from "./config/paths";
-import { atomicWriteFile } from "./utils/fs";
+import { atomicWriteFileAsync } from "./utils/fs";
 import { basename } from "node:path";
 import { loadGlobalConfig, loadProjectsRegistry, ensureGlobalConfigDir } from "./config/loader";
 import { TaskQueue, TaskPriority } from "./core/queue";
@@ -49,13 +50,13 @@ async function main(): Promise<void> {
 
 	// Initialize dispatch ledger (persistent deduplication)
 	const ledger = new DispatchLedger();
-	ledger.load();
+	await ledger.load();
 
 	// Prune old data at startup
 	try {
-		ledger.prune(30);
-		pruneEvents(MAX_EVENT_ENTRIES);
-		pruneStats(STATS_RETENTION_DAYS);
+		await ledger.prune(30);
+		await pruneEvents(MAX_EVENT_ENTRIES);
+		await pruneStats(STATS_RETENTION_DAYS);
 	} catch (err) {
 		logger.warn({ err }, "Failed to prune old data");
 	}
@@ -136,7 +137,10 @@ async function main(): Promise<void> {
 		res.setHeader("Content-Type", "application/json");
 		const statePath = stateFilePath();
 		if (existsSync(statePath)) {
-			res.end(readFileSync(statePath, "utf-8"));
+			readFile(statePath, "utf-8").then(
+				(data) => res.end(data),
+				() => res.end(JSON.stringify({ status: "starting" })),
+			);
 		} else {
 			res.end(JSON.stringify({ status: "starting" }));
 		}
@@ -224,35 +228,35 @@ async function main(): Promise<void> {
 	await poller.start();
 }
 
-function updateState(runner: TaskRunner, queue: TaskQueue): void {
+async function updateState(runner: TaskRunner, queue: TaskQueue): Promise<void> {
 	const state = {
 		status: shuttingDown ? "stopping" : "running",
 		uptime: process.uptime(),
 		projects: [] as Array<{ name: string; agent: string; status: string }>,
 		activeTasks: runner.activeTasks,
 		queuedTasks: queue.length,
-		todayStats: loadTodayStats(),
+		todayStats: await loadTodayStats(),
 	};
 
 	try {
-		atomicWriteFile(stateFilePath(), JSON.stringify(state, null, 2));
+		await atomicWriteFileAsync(stateFilePath(), JSON.stringify(state, null, 2));
 	} catch {
 		// Ignore write errors
 	}
 }
 
-function loadTodayStats(): {
+async function loadTodayStats(): Promise<{
 	tasks: number;
 	prs: number;
 	failed: number;
 	estimatedCost: number;
-} {
+}> {
 	try {
 		const statsPath = statsFilePath();
 		if (!existsSync(statsPath)) {
 			return { tasks: 0, prs: 0, failed: 0, estimatedCost: 0 };
 		}
-		const stats = JSON.parse(readFileSync(statsPath, "utf-8"));
+		const stats = JSON.parse(await readFile(statsPath, "utf-8"));
 		const today = new Date().toISOString().slice(0, 10);
 		return (
 			stats.dailyStats?.[today] ?? {

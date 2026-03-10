@@ -1,8 +1,9 @@
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import { dispatchedLedgerPath } from "../config/paths";
 import { ensureGlobalConfigDir } from "../config/loader";
 import { logger } from "../utils/logger";
-import { safeAppendFile } from "../utils/fs";
+import { safeAppendFileAsync } from "../utils/fs";
 
 interface LedgerEntry {
   id: string;
@@ -18,13 +19,13 @@ export class DispatchLedger {
     this.filePath = dispatchedLedgerPath();
   }
 
-  load(): void {
+  async load(): Promise<void> {
     ensureGlobalConfigDir();
 
     if (!existsSync(this.filePath)) return;
 
     try {
-      const content = readFileSync(this.filePath, "utf-8");
+      const content = await readFile(this.filePath, "utf-8");
       for (const line of content.split("\n")) {
         const trimmed = line.trim();
         if (!trimmed) continue;
@@ -44,7 +45,7 @@ export class DispatchLedger {
     }
   }
 
-  markDispatched(id: string, type: "task" | "comment" = "task"): void {
+  async markDispatched(id: string, type: "task" | "comment" = "task"): Promise<void> {
     if (this.dispatched.has(id)) return;
     this.dispatched.add(id);
 
@@ -55,7 +56,7 @@ export class DispatchLedger {
     };
 
     try {
-      safeAppendFile(this.filePath, JSON.stringify(entry) + "\n");
+      await safeAppendFileAsync(this.filePath, JSON.stringify(entry) + "\n");
     } catch (err) {
       logger.error({ err, id }, "Failed to persist dispatch ledger entry");
     }
@@ -65,11 +66,11 @@ export class DispatchLedger {
     return this.dispatched.has(id);
   }
 
-  prune(maxAgeDays: number = 30): void {
+  async prune(maxAgeDays: number = 30): Promise<void> {
     if (!existsSync(this.filePath)) return;
 
     const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
-    const content = readFileSync(this.filePath, "utf-8");
+    const content = await readFile(this.filePath, "utf-8");
     const retained: string[] = [];
     const retainedIds = new Set<string>();
 
@@ -88,7 +89,7 @@ export class DispatchLedger {
     }
 
     this.dispatched = retainedIds;
-    writeFileSync(this.filePath, retained.join("\n") + (retained.length ? "\n" : ""));
+    await writeFile(this.filePath, retained.join("\n") + (retained.length ? "\n" : ""));
     logger.info({ retained: retained.length, maxAgeDays }, "Pruned dispatch ledger");
   }
 }

@@ -1,6 +1,6 @@
-import { writeFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { safeJsonParse } from "../utils/fs";
+import { safeJsonParseAsync } from "../utils/fs";
 
 const HISTORY_FILE = ".claude-history.json";
 
@@ -22,38 +22,38 @@ function historyPath(worktreePath: string): string {
   return join(worktreePath, HISTORY_FILE);
 }
 
-export function loadHistory(worktreePath: string): FeedbackHistory | null {
-  return safeJsonParse<FeedbackHistory | null>(historyPath(worktreePath), null);
+export async function loadHistory(worktreePath: string): Promise<FeedbackHistory | null> {
+  return safeJsonParseAsync<FeedbackHistory | null>(historyPath(worktreePath), null);
 }
 
-export function saveHistory(
+export async function saveHistory(
   worktreePath: string,
   history: FeedbackHistory,
-): void {
-  writeFileSync(historyPath(worktreePath), JSON.stringify(history, null, 2));
+): Promise<void> {
+  await writeFile(historyPath(worktreePath), JSON.stringify(history, null, 2));
 }
 
-export function initHistory(
+export async function initHistory(
   worktreePath: string,
   taskId: string,
   description: string,
-): FeedbackHistory {
+): Promise<FeedbackHistory> {
   const history: FeedbackHistory = {
     taskId,
     originalDescription: description,
     feedbackRounds: [],
   };
-  saveHistory(worktreePath, history);
+  await saveHistory(worktreePath, history);
   return history;
 }
 
-export function addFeedbackRound(
+export async function addFeedbackRound(
   worktreePath: string,
   comment: string,
   file?: string,
   line?: number,
-): FeedbackHistory {
-  let history = loadHistory(worktreePath);
+): Promise<FeedbackHistory> {
+  let history = await loadHistory(worktreePath);
   if (!history) {
     throw new Error("No feedback history found in worktree");
   }
@@ -67,7 +67,7 @@ export function addFeedbackRound(
   };
 
   history.feedbackRounds.push(round);
-  saveHistory(worktreePath, history);
+  await saveHistory(worktreePath, history);
   return history;
 }
 

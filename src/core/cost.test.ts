@@ -17,19 +17,19 @@ describe("cost tracking", () => {
 		if (existsSync(TEST_HOME)) rmSync(TEST_HOME, { recursive: true });
 	});
 
-	it("records task cost to history", () => {
-		recordTaskCost("task-1", 1.5, 120, true, false);
-		const history = getTaskHistory();
+	it("records task cost to history", async () => {
+		await recordTaskCost("task-1", 1.5, 120, true, false);
+		const history = await getTaskHistory();
 		expect(history).toHaveLength(1);
 		expect(history[0].taskId).toBe("task-1");
 		expect(history[0].cost).toBe(1.5);
 		expect(history[0].status).toBe("success");
 	});
 
-	it("accumulates multiple tasks", () => {
-		recordTaskCost("task-1", 1.0, 60, true, false);
-		recordTaskCost("task-2", 2.0, 120, false, true);
-		const history = getTaskHistory();
+	it("accumulates multiple tasks", async () => {
+		await recordTaskCost("task-1", 1.0, 60, true, false);
+		await recordTaskCost("task-2", 2.0, 120, false, true);
+		const history = await getTaskHistory();
 		expect(history).toHaveLength(2);
 		expect(history[1].status).toBe("failed");
 	});

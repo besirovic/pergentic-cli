@@ -1,7 +1,8 @@
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import { eventsFilePath } from "../config/paths";
 import { ensureGlobalConfigDir } from "../config/loader";
-import { safeAppendFile } from "../utils/fs";
+import { safeAppendFileAsync } from "../utils/fs";
 
 export type LifecycleEventType =
 	| "taskStarted"
@@ -22,22 +23,22 @@ export interface LifecycleEvent {
 	retriesAttempted?: number;
 }
 
-export function recordEvent(event: LifecycleEvent): void {
+export async function recordEvent(event: LifecycleEvent): Promise<void> {
 	ensureGlobalConfigDir();
-	safeAppendFile(eventsFilePath(), JSON.stringify(event) + "\n");
+	await safeAppendFileAsync(eventsFilePath(), JSON.stringify(event) + "\n");
 }
 
 export const MAX_EVENT_ENTRIES = 10_000;
 
-export function pruneEvents(maxEntries: number = MAX_EVENT_ENTRIES): void {
+export async function pruneEvents(maxEntries: number = MAX_EVENT_ENTRIES): Promise<void> {
 	const filePath = eventsFilePath();
 	if (!existsSync(filePath)) return;
 
-	const content = readFileSync(filePath, "utf-8");
+	const content = await readFile(filePath, "utf-8");
 	const lines = content.split("\n").filter((l) => l.trim());
 
 	if (lines.length <= maxEntries) return;
 
 	const retained = lines.slice(-maxEntries);
-	writeFileSync(filePath, retained.join("\n") + "\n");
+	await writeFile(filePath, retained.join("\n") + "\n");
 }
