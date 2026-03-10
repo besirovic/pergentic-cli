@@ -4,6 +4,7 @@ import { promptTemplatePath } from "../config/paths";
 import type { Task } from "./queue";
 import type { ProjectConfig } from "../config/schema";
 import { logger } from "../utils/logger";
+import { detectPRTemplate, buildPRTemplatePromptSection } from "./pr-template";
 
 export type PromptTemplateContext = Record<PromptTemplateVar, string>;
 
@@ -96,22 +97,44 @@ export function validateTemplate(template: string): string[] {
 	);
 }
 
+export interface BuildPromptOptions {
+	projectPath: string;
+	task: Task;
+	projectName: string;
+	projectConfig: ProjectConfig;
+	agentName: string;
+	worktreePath?: string;
+}
+
 /**
  * Build the final prompt: load template, resolve variables,
  * prepend systemContext if configured.
  * Falls back to default template when no template file exists.
  */
-export function buildPromptFromTemplate(
-	projectPath: string,
-	task: Task,
-	projectName: string,
-	projectConfig: ProjectConfig,
-	agentName: string,
-): string {
+export function buildPromptFromTemplate(opts: BuildPromptOptions): string {
+	const { projectPath, task, projectName, projectConfig, agentName, worktreePath } = opts;
 	const templateFilename = projectConfig.promptTemplate?.path ?? "PROMPT.md";
 	const template = loadPromptTemplate(projectPath, templateFilename) ?? DEFAULT_PROMPT_TEMPLATE;
+
+	// Detect PR template from worktree
+	const repoRoot = worktreePath ?? projectPath;
+	const prTemplateContent = detectPRTemplate(repoRoot, projectConfig.pr?.templatePath);
+	const prTemplateSection = prTemplateContent
+		? buildPRTemplatePromptSection(prTemplateContent)
+		: "";
+
+	// Resolve standard variables first (without prTemplate to avoid mangling
+	// {var} placeholders that may appear inside the PR template content)
 	const context = buildTemplateContext(task, projectName, projectConfig, agentName);
 	let prompt = resolveTemplate(template, context);
+
+	// Insert prTemplate after variable resolution to preserve its raw content
+	if (template.includes("{prTemplate}")) {
+		prompt = prompt.replace("{prTemplate}", prTemplateSection);
+	} else if (prTemplateContent) {
+		// Auto-append when the prompt template doesn't explicitly use {prTemplate}
+		prompt = `${prompt}\n\n${prTemplateSection}`;
+	}
 
 	// Prepend systemContext if configured (preserves existing behavior)
 	if (projectConfig.claude?.systemContext) {

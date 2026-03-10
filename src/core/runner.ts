@@ -14,6 +14,7 @@ import { AgentName } from "../config/schema";
 import type { GlobalConfig, ProjectConfig } from "../config/schema";
 import { buildBranchName, buildBranchTemplateVars, DEFAULT_BRANCH_TEMPLATE } from "./branch-name";
 import { buildPromptFromTemplate } from "./prompt-template";
+import { readAgentPRBody } from "./pr-template";
 import type { SpawnResult } from "../utils/process";
 import { cancellableSleep } from "../utils/sleep";
 import simpleGit from "simple-git";
@@ -136,13 +137,14 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
         prompt = payload.description;
       } else {
         initHistory(worktree.path, payload.taskId, payload.description);
-        prompt = buildPromptFromTemplate(
+        prompt = buildPromptFromTemplate({
           projectPath,
           task,
           projectName,
           projectConfig,
-          parsedAgent,
-        );
+          agentName: parsedAgent,
+          worktreePath: worktree.path,
+        });
       }
 
       // Resolve agent
@@ -293,7 +295,8 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
           }
 
           // Commit → push → PR
-          const prDetails = buildPRDetails(task, projectConfig);
+          const agentBody = readAgentPRBody(worktree.path);
+          const prDetails = buildPRDetails(task, projectConfig, agentBody);
           await commitAll(worktree.path, prDetails.commitMessage);
           await pushBranch(worktree.path, worktree.branch);
 
@@ -526,7 +529,8 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       }
 
       // Commit, push, create PR
-      const prDetails = buildPRDetails(task, projectConfig);
+      const scheduledAgentBody = readAgentPRBody(worktree.path);
+      const prDetails = buildPRDetails(task, projectConfig, scheduledAgentBody);
       await commitAll(worktree.path, prDetails.commitMessage);
       await pushBranch(worktree.path, worktree.branch);
 

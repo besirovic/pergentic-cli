@@ -61,6 +61,7 @@ const ClaudeOptionsSchema = z.object({
 const PRConfigSchema = z.object({
 	titleFormat: z.string().default("feat: {taskTitle} [{taskId}]"),
 	bodyTemplate: z.string().optional(),
+	templatePath: z.string().optional(),
 	labels: z.array(z.string()).default(["ai-generated", "needs-review"]),
 	reviewers: z.array(z.string()).optional(),
 });
