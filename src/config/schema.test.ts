@@ -172,6 +172,35 @@ describe("ProjectConfigSchema", () => {
       }),
     ).toThrow();
   });
+
+  it("accepts valid jiraDomain hostnames", () => {
+    for (const domain of [
+      "mycompany.atlassian.net",
+      "jira.example.com",
+      "localhost",
+      "a-b.c-d.example.com",
+    ]) {
+      const result = ProjectConfigSchema.parse({ repo: "test", jiraDomain: domain });
+      expect(result.jiraDomain).toBe(domain);
+    }
+  });
+
+  it("rejects jiraDomain values with path traversal or invalid chars", () => {
+    for (const domain of [
+      "evil.com/../../",
+      "evil.com/path",
+      "https://evil.com",
+      "evil.com:8080",
+      ".leading-dot.com",
+      "trailing-dot.com.",
+      "-starts-with-dash.com",
+      "has spaces.com",
+    ]) {
+      expect(() =>
+        ProjectConfigSchema.parse({ repo: "test", jiraDomain: domain }),
+      ).toThrow();
+    }
+  });
 });
 
 describe("ProjectsRegistrySchema", () => {

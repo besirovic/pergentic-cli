@@ -197,7 +197,10 @@ export const ProjectConfigSchema = z.object({
 	linearApiKey: z.string().optional(),
 	slackBotToken: z.string().optional(),
 	slackAppToken: z.string().optional(),
-	jiraDomain: z.string().optional(),
+	jiraDomain: z.string().regex(
+		/^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$/,
+		"jiraDomain must be a bare hostname (e.g. mycompany.atlassian.net), not a URL or path",
+	).optional(),
 	jiraEmail: z.string().email().optional(),
 	jiraApiToken: z.string().optional(),
 	linearTeamId: z.string().optional(),

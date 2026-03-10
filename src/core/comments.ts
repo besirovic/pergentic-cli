@@ -74,6 +74,8 @@ async function postLinearComment(
   });
 }
 
+const JIRA_DOMAIN_RE = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$/;
+
 async function postJiraComment(
   jiraIssueKey: string,
   body: string,
@@ -81,6 +83,10 @@ async function postJiraComment(
   jiraEmail: string,
   jiraApiToken: string,
 ): Promise<void> {
+  if (!JIRA_DOMAIN_RE.test(jiraDomain)) {
+    throw new Error(`Invalid jiraDomain: ${jiraDomain}`);
+  }
+
   const auth = Buffer.from(`${jiraEmail}:${jiraApiToken}`).toString("base64");
 
   await fetchWithRetry(
