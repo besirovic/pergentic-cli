@@ -9,7 +9,9 @@ import { detectPRTemplate, buildPRTemplatePromptSection } from "./pr-template";
 
 export type PromptTemplateContext = Record<PromptTemplateVar, string>;
 
-// Cache validated templates so we only warn once per file path
+// Cache validated templates so we only warn once per file path.
+// Capped to prevent unbounded growth in long-running daemon processes.
+const MAX_VALIDATED_PATHS = 256;
 const validatedPaths = new Set<string>();
 
 /**
@@ -75,6 +77,9 @@ export async function loadPromptTemplate(
 	const template = await readFile(fullPath, "utf-8");
 
 	if (!validatedPaths.has(fullPath)) {
+		if (validatedPaths.size >= MAX_VALIDATED_PATHS) {
+			validatedPaths.clear();
+		}
 		validatedPaths.add(fullPath);
 		const unknownVars = validateTemplate(template);
 		if (unknownVars.length > 0) {
