@@ -130,6 +130,12 @@ export function spawnAgentAndWait(
       stdoutLen -= stdoutChunks.shift()!.length;
       stdoutTruncated = true;
     }
+    if (stdoutChunks.length === 1 && stdoutLen > MAX_OUTPUT) {
+      const single = stdoutChunks[0];
+      stdoutChunks[0] = single.subarray(single.length - MAX_OUTPUT);
+      stdoutLen = MAX_OUTPUT;
+      stdoutTruncated = true;
+    }
   });
 
   child.stderr?.on("data", (chunk: Buffer) => {
@@ -137,6 +143,12 @@ export function spawnAgentAndWait(
     stderrLen += chunk.length;
     while (stderrLen > MAX_OUTPUT && stderrChunks.length > 1) {
       stderrLen -= stderrChunks.shift()!.length;
+      stderrTruncated = true;
+    }
+    if (stderrChunks.length === 1 && stderrLen > MAX_OUTPUT) {
+      const single = stderrChunks[0];
+      stderrChunks[0] = single.subarray(single.length - MAX_OUTPUT);
+      stderrLen = MAX_OUTPUT;
       stderrTruncated = true;
     }
   });

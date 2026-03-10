@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildVerificationFixPrompt, execCommand } from "./verify";
+import { buildVerificationFixPrompt, execCommand, spawnAgentAndWait } from "./verify";
 
 describe("buildVerificationFixPrompt", () => {
 	it("includes command and attempt info", () => {
@@ -39,5 +39,44 @@ describe("execCommand", () => {
 	it("captures stderr output", async () => {
 		const result = await execCommand("echo err >&2", "/tmp", {});
 		expect(result.output).toContain("err");
+	});
+});
+
+describe("spawnAgentAndWait output buffering", () => {
+	it("truncates stdout from a single large chunk to MAX_OUTPUT", async () => {
+		const TRUNCATION_PREFIX = "[Output truncated to last 8KB]\n";
+		// Generate 16KB of output in a single write (exceeds 8192 MAX_OUTPUT)
+		const handle = spawnAgentAndWait(
+			{ command: "node", args: ["-e", "process.stdout.write('A'.repeat(16384))"] },
+			"/tmp",
+			{},
+		);
+		const result = await handle.result;
+		expect(result.stdout).toContain(TRUNCATION_PREFIX);
+		// Buffer truncated to 8192 + prefix
+		expect(result.stdout.length).toBeLessThanOrEqual(8192 + TRUNCATION_PREFIX.length);
+	});
+
+	it("truncates stderr from a single large chunk to MAX_OUTPUT", async () => {
+		const TRUNCATION_PREFIX = "[Output truncated to last 8KB]\n";
+		const handle = spawnAgentAndWait(
+			{ command: "node", args: ["-e", "process.stderr.write('B'.repeat(16384))"] },
+			"/tmp",
+			{},
+		);
+		const result = await handle.result;
+		expect(result.stderr).toContain(TRUNCATION_PREFIX);
+		expect(result.stderr.length).toBeLessThanOrEqual(8192 + TRUNCATION_PREFIX.length);
+	});
+
+	it("keeps the tail (most recent) bytes when truncating", async () => {
+		// Write 'A' * 8000 + 'Z' * 1000 = 9000 bytes; after truncation we should see only 'Z's at the end
+		const handle = spawnAgentAndWait(
+			{ command: "node", args: ["-e", "process.stdout.write('A'.repeat(8000) + 'Z'.repeat(1000))"] },
+			"/tmp",
+			{},
+		);
+		const result = await handle.result;
+		expect(result.stdout).toMatch(/Z{1000}$/);
 	});
 });
