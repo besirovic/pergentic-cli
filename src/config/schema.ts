@@ -70,7 +70,7 @@ const PRConfigSchema = z.object({
 const BranchConfigSchema = z.object({
 	template: z.string().default("{taskId}-{title}"),
 	typeMap: z.record(z.string(), z.array(z.string())).optional(),
-}).default({}).superRefine((val, ctx) => {
+}).default({ template: "{taskId}-{title}" }).superRefine((val, ctx) => {
 	if (!val.template.includes("{taskId}")) {
 		ctx.addIssue({
 			code: z.ZodIssueCode.custom,
@@ -181,7 +181,7 @@ export const ProjectConfigSchema = z.object({
 	anthropicApiKey: z.string().optional(),
 	openaiApiKey: z.string().optional(),
 	openrouterApiKey: z.string().optional(),
-	agentProviders: z.record(AgentName, ApiProvider).optional(),
+	agentProviders: z.record(z.string(), ApiProvider).optional(),
 	githubToken: z.string().optional(),
 	linearApiKey: z.string().optional(),
 	slackBotToken: z.string().optional(),
@@ -190,9 +190,9 @@ export const ProjectConfigSchema = z.object({
 	jiraEmail: z.string().email().optional(),
 	jiraApiToken: z.string().optional(),
 	linearTeamId: z.string().optional(),
-	agentTools: z.record(AgentName, z.array(z.string())).optional(),
-	agentLabels: z.record(AgentName, z.array(z.string())).optional(),
-	modelLabels: z.record(AgentName, z.record(z.string(), z.string())).optional(),
+	agentTools: z.record(z.string(), z.array(z.string())).optional(),
+	agentLabels: z.record(z.string(), z.array(z.string())).optional(),
+	modelLabels: z.record(z.string(), z.record(z.string(), z.string())).optional(),
 	claude: ClaudeOptionsSchema.optional(),
 	pr: PRConfigSchema.optional(),
 	linear: LinearConfigSchema.optional(),
