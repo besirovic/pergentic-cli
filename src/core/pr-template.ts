@@ -35,7 +35,7 @@ async function readSafeTemplate(filePath: string): Promise<string> {
 			{ path: filePath, bytes: Buffer.byteLength(content, "utf-8"), maxBytes: MAX_TEMPLATE_BYTES },
 			"PR template exceeds size limit, truncating",
 		);
-		return content.slice(0, MAX_TEMPLATE_BYTES);
+		return Buffer.from(content, "utf-8").subarray(0, MAX_TEMPLATE_BYTES).toString("utf-8");
 	}
 	return content;
 }

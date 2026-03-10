@@ -84,7 +84,21 @@ describe("detectPRTemplate", () => {
 
 		const result = await detectPRTemplate(TEST_DIR);
 		expect(result).not.toBeNull();
-		expect(result!.length).toBe(10 * 1024);
+		expect(Buffer.byteLength(result!, "utf-8")).toBe(10 * 1024);
+	});
+
+	it("truncates multi-byte content by bytes, not characters", async () => {
+		const dir = join(TEST_DIR, ".github");
+		mkdirSync(dir, { recursive: true });
+		// Each "é" is 2 bytes in UTF-8; fill well beyond the 10 KB limit
+		const large = "é".repeat(10_000);
+		writeFileSync(join(dir, "PULL_REQUEST_TEMPLATE.md"), large);
+
+		const result = await detectPRTemplate(TEST_DIR);
+		expect(result).not.toBeNull();
+		expect(Buffer.byteLength(result!, "utf-8")).toBeLessThanOrEqual(10 * 1024);
+		// Character count must be less than byte limit since each char is 2 bytes
+		expect(result!.length).toBeLessThan(10 * 1024);
 	});
 });
 
