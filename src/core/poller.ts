@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import type { ProjectContext } from "../providers/types";
+import type { ProjectContext, TaskProvider } from "../providers/types";
 import { LinearProvider } from "../providers/linear";
 import { GitHubProvider } from "../providers/github";
 import { TaskQueue, TaskPriority, type Task } from "./queue";
@@ -9,10 +9,16 @@ import { resolveTargetAgentsWithModels } from "./resolve-target-agents";
 import { validateLabels } from "./validate-labels";
 import { loadProjectsRegistry } from "../config/loader";
 import { getCachedProjectConfig } from "../config/cache";
+import type { ProjectConfig } from "../config/schema";
 import { logger } from "../utils/logger";
 
 export interface PollerConfig {
   pollInterval: number; // seconds
+}
+
+interface CachedProviders {
+  fingerprint: string;
+  providers: TaskProvider[];
 }
 
 export class Poller {
@@ -23,6 +29,7 @@ export class Poller {
   private running = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private afterPollHook: (() => Promise<void>) | null = null;
+  private providerCache = new Map<string, CachedProviders>();
 
   constructor(
     queue: TaskQueue,
@@ -109,14 +116,7 @@ export class Poller {
         linearTeamId: projectConfig.linearTeamId,
       };
 
-      // Create providers from per-project credentials
-      const providers = [];
-      if (projectConfig.linearApiKey) {
-        providers.push(new LinearProvider(projectConfig.linearApiKey));
-      }
-      if (projectConfig.githubToken) {
-        providers.push(new GitHubProvider(projectConfig.githubToken));
-      }
+      const providers = this.getProviders(entry.path, projectConfig);
 
       for (const provider of providers) {
         try {
@@ -202,6 +202,35 @@ export class Poller {
         }
       }
     }
+
+    // Clean up cached providers for projects no longer in the registry
+    const activeProjectPaths = new Set(registry.projects.map((p) => p.path));
+    for (const key of this.providerCache.keys()) {
+      if (!activeProjectPaths.has(key)) {
+        this.providerCache.delete(key);
+      }
+    }
+  }
+
+  private getProviders(
+    projectPath: string,
+    config: ProjectConfig,
+  ): TaskProvider[] {
+    const fingerprint = `${config.linearApiKey ?? ""}:${config.githubToken ?? ""}`;
+    const cached = this.providerCache.get(projectPath);
+    if (cached && cached.fingerprint === fingerprint) {
+      return cached.providers;
+    }
+
+    const providers: TaskProvider[] = [];
+    if (config.linearApiKey) {
+      providers.push(new LinearProvider(config.linearApiKey));
+    }
+    if (config.githubToken) {
+      providers.push(new GitHubProvider(config.githubToken));
+    }
+    this.providerCache.set(projectPath, { fingerprint, providers });
+    return providers;
   }
 
   private async dispatch(): Promise<void> {
