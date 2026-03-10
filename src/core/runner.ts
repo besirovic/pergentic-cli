@@ -239,7 +239,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
     const { payload } = task;
     const ctx = { taskId: payload.taskId, title: payload.title, project: projectName };
 
-    const timeoutMs = projectConfig.claude?.agentTimeout
+    const timeoutMs = projectConfig.claude
       ? projectConfig.claude.agentTimeout * 1000
       : undefined;
 
@@ -314,7 +314,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
           const commands = verifyConfig?.commands ?? [];
 
           if (commands.length > 0) {
-            const commandTimeoutMs = verifyConfig?.commandTimeout
+            const commandTimeoutMs = verifyConfig
               ? verifyConfig.commandTimeout * 1000
               : undefined;
             const verified = await this.deps.verification.runVerificationLoop(

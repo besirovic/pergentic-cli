@@ -114,6 +114,22 @@ describe("ProjectConfigSchema", () => {
     expect(result.agentProviders).toBeUndefined();
   });
 
+  it("applies agentTimeout default when claude object is present but field is omitted", () => {
+    const result = ProjectConfigSchema.parse({
+      repo: "test",
+      claude: {},
+    });
+    expect(result.claude?.agentTimeout).toBe(3600);
+  });
+
+  it("applies commandTimeout default when verification object is present but field is omitted", () => {
+    const result = ProjectConfigSchema.parse({
+      repo: "test",
+      verification: {},
+    });
+    expect(result.verification?.commandTimeout).toBe(300);
+  });
+
   it("rejects invalid agent provider", () => {
     expect(() =>
       ProjectConfigSchema.parse({

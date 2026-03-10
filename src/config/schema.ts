@@ -61,7 +61,7 @@ const ClaudeOptionsSchema = z.object({
 	maxCostPerTask: z.number().optional(),
 	allowedTools: z.array(z.string()).optional(),
 	systemContext: z.string().optional(),
-	agentTimeout: z.number().min(60).default(DEFAULT_AGENT_TIMEOUT_SECONDS).optional(),
+	agentTimeout: z.number().min(60).default(DEFAULT_AGENT_TIMEOUT_SECONDS),
 });
 
 const PRConfigSchema = z.object({
@@ -129,7 +129,7 @@ const VerificationConfigSchema = z.object({
 	commands: z.array(z.string()).default([]),
 	maxRetries: z.number().min(0).max(20).default(3),
 	/** Per-command timeout in seconds (default: 300 = 5 minutes). */
-	commandTimeout: z.number().min(10).default(DEFAULT_VERIFICATION_COMMAND_TIMEOUT_SECONDS).optional(),
+	commandTimeout: z.number().min(10).default(DEFAULT_VERIFICATION_COMMAND_TIMEOUT_SECONDS),
 });
 
 const AgentRetryConfigSchema = z.object({

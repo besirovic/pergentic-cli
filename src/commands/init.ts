@@ -662,6 +662,7 @@ async function wizardStepConfigureVerification(
 	config.verification = {
 		commands,
 		maxRetries: Number(maxRetriesStr),
+		commandTimeout: 300,
 	};
 
 	console.log(
