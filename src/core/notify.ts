@@ -110,13 +110,22 @@ function formatDesktopMessage(event: TaskEvent): { title: string; body: string }
 	}
 }
 
+function escapeAppleScript(str: string): string {
+	return str
+		.replace(/\\/g, "\\\\")
+		.replace(/"/g, '\\"')
+		.replace(/\n/g, " ")
+		.replace(/\r/g, " ")
+		.replace(/\t/g, " ");
+}
+
 function sendDesktopNotification(event: TaskEvent): Promise<void> {
 	const { title, body } = formatDesktopMessage(event);
 	const os = platform();
 
 	return new Promise((resolve) => {
 		if (os === "darwin") {
-			const script = `display notification "${body.replace(/"/g, '\\"')}" with title "${title.replace(/"/g, '\\"')}"`;
+			const script = `display notification "${escapeAppleScript(body)}" with title "${escapeAppleScript(title)}"`;
 			execFile("osascript", ["-e", script], (err) => {
 				if (err) logger.debug({ err }, "Desktop notification failed");
 				resolve();
