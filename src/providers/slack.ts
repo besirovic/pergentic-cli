@@ -9,6 +9,8 @@ import { logger } from "../utils/logger";
 // Slack Socket Mode provider
 // Uses WebSocket connection (outbound only), no public URL needed
 
+type ConnectionState = "disconnected" | "connecting" | "connected";
+
 interface SlackMessage {
 	type: string;
 	text: string;
@@ -23,6 +25,8 @@ export class SlackProvider implements TaskProvider {
 	private botToken: string;
 	private appToken: string;
 	private ws: WebSocket | null = null;
+	private connectionState: ConnectionState = "disconnected";
+	private connectionId = 0;
 	private pendingTasks: IncomingTask[] = [];
 	private channelProjectMap: Record<string, string>;
 
@@ -37,6 +41,10 @@ export class SlackProvider implements TaskProvider {
 	}
 
 	async connect(): Promise<void> {
+		this.connectionState = "connecting";
+		this.connectionId++;
+		const currentConnectionId = this.connectionId;
+
 		// Get WebSocket URL via apps.connections.open
 		const res = await fetch("https://slack.com/api/apps.connections.open", {
 			method: "POST",
@@ -48,35 +56,59 @@ export class SlackProvider implements TaskProvider {
 
 		const data = (await res.json()) as { ok: boolean; url?: string };
 		if (!data.ok || !data.url) {
+			this.connectionState = "disconnected";
 			throw new Error("Failed to open Slack Socket Mode connection");
 		}
 
-		this.ws = new WebSocket(data.url);
+		// Clear stale events from previous connection
+		this.pendingTasks = [];
 
-		this.ws.onmessage = (event) => {
-			try {
-				const payload = JSON.parse(String(event.data));
-				this.handleEvent(payload);
-			} catch (err) {
-				logger.error({ err }, "Failed to parse Slack event");
-			}
-		};
+		const ws = new WebSocket(data.url);
 
-		this.ws.onerror = (err) => {
-			logger.error({ err }, "Slack WebSocket error");
-		};
+		try {
+			ws.onmessage = (event) => {
+				try {
+					const payload = JSON.parse(String(event.data));
+					this.handleEvent(payload, currentConnectionId);
+				} catch (err) {
+					logger.error({ err }, "Failed to parse Slack event");
+				}
+			};
 
-		this.ws.onclose = () => {
-			logger.info("Slack WebSocket closed, will reconnect on next poll");
-			this.ws = null;
-		};
+			ws.onerror = (err) => {
+				logger.error({ err }, "Slack WebSocket error");
+			};
+
+			ws.onclose = () => {
+				logger.info(
+					"Slack WebSocket closed, will reconnect on next poll"
+				);
+				if (this.connectionId === currentConnectionId) {
+					this.ws = null;
+					this.connectionState = "disconnected";
+				}
+			};
+		} catch (err) {
+			ws.close();
+			this.connectionState = "disconnected";
+			throw err;
+		}
+
+		this.ws = ws;
+		this.connectionState = "connected";
 	}
 
-	private handleEvent(payload: {
-		type: string;
-		envelope_id?: string;
-		payload?: { event?: SlackMessage };
-	}): void {
+	private handleEvent(
+		payload: {
+			type: string;
+			envelope_id?: string;
+			payload?: { event?: SlackMessage };
+		},
+		sourceConnectionId: number
+	): void {
+		// Ignore events from stale connections
+		if (sourceConnectionId !== this.connectionId) return;
+
 		// Acknowledge the event
 		if (payload.envelope_id && this.ws) {
 			this.ws.send(JSON.stringify({ envelope_id: payload.envelope_id }));
@@ -122,7 +154,7 @@ export class SlackProvider implements TaskProvider {
 	}
 
 	async poll(_project: ProjectContext): Promise<IncomingTask[]> {
-		if (!this.ws) {
+		if (this.connectionState !== "connected") {
 			try {
 				await this.connect();
 			} catch (err) {
@@ -155,5 +187,6 @@ export class SlackProvider implements TaskProvider {
 			this.ws.close();
 			this.ws = null;
 		}
+		this.connectionState = "disconnected";
 	}
 }
