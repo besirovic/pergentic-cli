@@ -78,7 +78,7 @@ export function buildBranchName(template: string, vars: BranchTemplateVars): str
     .replace(/\.lock$/, "");
 
   if (!sanitized) {
-    const hash = createHash("md5").update(template + JSON.stringify(vars)).digest("hex").slice(0, 7);
+    const hash = createHash("sha256").update(template + JSON.stringify(vars)).digest("hex").slice(0, 7);
     return `branch-${hash}`;
   }
 
@@ -120,7 +120,7 @@ export function buildBranchTemplateVars(
     vars.timestamp = String(Math.floor(Date.now() / 1000));
   }
   if (template.includes("{shortHash}")) {
-    vars.shortHash = createHash("md5").update(opts.title).digest("hex").slice(0, 7);
+    vars.shortHash = createHash("sha256").update(opts.title).digest("hex").slice(0, 7);
   }
 
   return vars;

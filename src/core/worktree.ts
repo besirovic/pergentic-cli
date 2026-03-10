@@ -18,14 +18,14 @@ export function slugify(text: string): string {
     .replace(/^-|-$/g, "");
 
   if (!slug) {
-    const hash = createHash("md5").update(text).digest("hex").slice(0, 7);
+    const hash = createHash("sha256").update(text).digest("hex").slice(0, 7);
     return `task-${hash}`;
   }
 
   if (slug.length <= 50) return slug;
 
   // Add hash suffix to prevent collisions when truncating
-  const hash = createHash("md5").update(text).digest("hex").slice(0, 7);
+  const hash = createHash("sha256").update(text).digest("hex").slice(0, 7);
   return `${slug.slice(0, 42)}-${hash}`;
 }
 
