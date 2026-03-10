@@ -6,6 +6,21 @@ import { fetchWithRetry } from "../utils/http";
 
 const LINEAR_API = "https://api.linear.app/graphql";
 
+interface GraphQLResponse<T = unknown> {
+  data?: T;
+  errors?: Array<{ message: string }>;
+}
+
+function checkGraphQLErrors(
+  response: GraphQLResponse,
+  context: string,
+): void {
+  if (response.errors?.length) {
+    const messages = response.errors.map((e) => e.message).join("; ");
+    throw new Error(`GraphQL error (${context}): ${messages}`);
+  }
+}
+
 interface LinearIssue {
   id: string;
   identifier: string;
@@ -59,9 +74,10 @@ export class LinearProvider extends BaseProvider {
       }),
     });
 
-    const data = (await res.json()) as {
-      data?: { issues?: { nodes: LinearIssue[] } };
-    };
+    const data = (await res.json()) as GraphQLResponse<{
+      issues?: { nodes: LinearIssue[] };
+    }>;
+    checkGraphQLErrors(data, "fetchTasks");
     const issues = data.data?.issues?.nodes ?? [];
     const tasks: IncomingTask[] = [];
 
@@ -95,16 +111,55 @@ export class LinearProvider extends BaseProvider {
     const stateName =
       result.status === "completed" ? "In Review" : "In Progress";
 
-    const mutation = `
-      mutation($issueId: String!, $stateId: String!) {
-        issueUpdate(id: $issueId, input: { stateId: $stateId }) {
-          success
-        }
-      }
-    `;
-
     try {
-      await fetchWithRetry(LINEAR_API, {
+      // First, look up the issue's team and resolve the state ID by name
+      const stateQuery = `
+        query($issueId: String!) {
+          issue(id: $issueId) {
+            team {
+              states(filter: { name: { eq: "${stateName}" } }) {
+                nodes { id }
+              }
+            }
+          }
+        }
+      `;
+
+      const stateRes = await fetchWithRetry(LINEAR_API, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: this.apiKey,
+        },
+        body: JSON.stringify({
+          query: stateQuery,
+          variables: { issueId: linearId },
+        }),
+      });
+
+      const stateData = (await stateRes.json()) as GraphQLResponse<{
+        issue?: { team?: { states?: { nodes: Array<{ id: string }> } } };
+      }>;
+      checkGraphQLErrors(stateData, "resolveState");
+
+      const stateId =
+        stateData.data?.issue?.team?.states?.nodes?.[0]?.id;
+      if (!stateId) {
+        throw new Error(
+          `Could not resolve Linear state "${stateName}" for issue ${linearId}`,
+        );
+      }
+
+      // Now update the issue with the resolved state ID
+      const mutation = `
+        mutation($issueId: String!, $stateId: String!) {
+          issueUpdate(id: $issueId, input: { stateId: $stateId }) {
+            success
+          }
+        }
+      `;
+
+      const updateRes = await fetchWithRetry(LINEAR_API, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -112,9 +167,14 @@ export class LinearProvider extends BaseProvider {
         },
         body: JSON.stringify({
           query: mutation,
-          variables: { issueId: linearId, stateId: stateName },
+          variables: { issueId: linearId, stateId },
         }),
       });
+
+      const updateData = (await updateRes.json()) as GraphQLResponse<{
+        issueUpdate?: { success: boolean };
+      }>;
+      checkGraphQLErrors(updateData, "issueUpdate");
     } catch (err) {
       logger.error({ err, taskId }, "Failed to update Linear status");
     }
