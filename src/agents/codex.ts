@@ -1,6 +1,8 @@
 import type { Agent, AgentCommand, AgentOptions, AgentToolDef } from "./types";
 import { spawnAsync } from "../utils/process";
 
+const VERSION_CHECK_TIMEOUT_MS = 5000;
+
 export const CODEX_TOOLS: AgentToolDef[] = [
   { name: "shell", description: "Execute shell commands", default: true },
   { name: "file_read", description: "Read files", default: true },
@@ -35,7 +37,7 @@ export const codex: Agent = {
 
   async isInstalled(): Promise<boolean> {
     try {
-      const result = await spawnAsync("codex", ["--version"], { timeout: 5000 });
+      const result = await spawnAsync("codex", ["--version"], { timeout: VERSION_CHECK_TIMEOUT_MS });
       return result.exitCode === 0;
     } catch {
       return false;

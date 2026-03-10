@@ -7,6 +7,8 @@ import type { Task } from "./queue";
 import type { ProjectConfig } from "../config/schema";
 import type { WorktreeInfo } from "./worktree";
 
+const COMMAND_OUTPUT_SNIPPET_CHARS = 1000;
+
 export class ScheduledCommandRunner {
   private lifecycle: TaskLifecycle;
   private prService: PRCreationService;
@@ -38,7 +40,7 @@ export class ScheduledCommandRunner {
     const duration = Math.floor((Date.now() - startTime) / 1000);
 
     if (!result.success) {
-      await this.lifecycle.recordFailure(ctx, duration, `Command failed: ${result.output.slice(-1000)}`, projectConfig);
+      await this.lifecycle.recordFailure(ctx, duration, `Command failed: ${result.output.slice(-COMMAND_OUTPUT_SNIPPET_CHARS)}`, projectConfig);
       return { success: false };
     }
 

@@ -17,6 +17,9 @@ import { type RunnerDeps, createDefaultDeps } from "./runner-deps";
 const MAX_ERROR_SNIPPET_CHARS = 2000;
 const MAX_ERROR_DETAIL_CHARS = 500;
 const SIGKILL_DELAY_MS = 10_000;
+const AGENT_RETRY_JITTER_MAX_MS = 1000;
+const ERROR_LOG_SNIPPET_CHARS = 500;
+const PROCESS_CHECK_INTERVAL_MS = 1000;
 
 export interface TaskCompletedMeta {
   duration: number;
@@ -259,7 +262,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
           return;
         }
 
-        const delayMs = baseDelayMs * Math.pow(2, attempt - 1) + Math.random() * 1000;
+        const delayMs = baseDelayMs * Math.pow(2, attempt - 1) + Math.random() * AGENT_RETRY_JITTER_MAX_MS;
         logger.info(
           { taskId: task.id, attempt, maxRetries: maxAgentRetries, delayMs: Math.round(delayMs) },
           "Retrying agent execution after failure",
@@ -295,7 +298,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       if (attempt < maxAgentRetries) {
         logger.warn(
           { taskId: task.id, exitCode: result.exitCode, attempt: attempt + 1, maxRetries: maxAgentRetries,
-            stderr: result.stderr.slice(-500) },
+            stderr: result.stderr.slice(-ERROR_LOG_SNIPPET_CHARS) },
           "Agent execution failed, will retry",
         );
       }
@@ -463,7 +466,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
           clearTimeout(timer);
           resolve();
         }
-      }, 1000);
+      }, PROCESS_CHECK_INTERVAL_MS);
 
       const timer = setTimeout(() => {
         clearInterval(check);

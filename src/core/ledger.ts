@@ -5,6 +5,8 @@ import { ensureGlobalConfigDir } from "../config/loader";
 import { logger } from "../utils/logger";
 import { safeAppendFileAsync } from "../utils/fs";
 
+const DEFAULT_LEDGER_RETENTION_DAYS = 30;
+
 interface LedgerEntry {
   id: string;
   type: "task" | "comment";
@@ -66,7 +68,7 @@ export class DispatchLedger {
     return this.dispatched.has(id);
   }
 
-  async prune(maxAgeDays: number = 30): Promise<void> {
+  async prune(maxAgeDays: number = DEFAULT_LEDGER_RETENTION_DAYS): Promise<void> {
     if (!existsSync(this.filePath)) return;
 
     const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;

@@ -1,6 +1,8 @@
-import chalk from "chalk";
 import { getTaskHistory, type TaskCostEntry } from "../core/cost";
 import { formatDuration } from "../utils/format";
+import { error } from "../utils/ui";
+
+const DEFAULT_HISTORY_LIMIT = 20;
 
 function statusIcon(status?: string): string {
 	return status === "failed" ? "✗" : "✓";
@@ -40,8 +42,7 @@ async function detailView(taskId: string): Promise<void> {
 	const entries = (await getTaskHistory()).filter((e) => e.taskId === taskId);
 
 	if (entries.length === 0) {
-		console.error(`${chalk.red("Error:")} No history found for task "${taskId}".`);
-		process.exitCode = 1;
+		error(`No history found for task "${taskId}".`);
 		return;
 	}
 
@@ -71,5 +72,5 @@ export async function history(opts: {
 	}
 
 	const entries = await getTaskHistory();
-	listView(entries, parseInt(opts.limit, 10) || 20, opts.project);
+	listView(entries, parseInt(opts.limit, 10) || DEFAULT_HISTORY_LIMIT, opts.project);
 }

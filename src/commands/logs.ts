@@ -1,7 +1,9 @@
 import { existsSync, readFileSync, createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
-import chalk from "chalk";
 import { daemonLogPath } from "../config/paths";
+import { error } from "../utils/ui";
+
+const DEFAULT_LOG_LINES = 50;
 
 function parseLogLine(line: string): string {
   try {
@@ -40,7 +42,7 @@ export async function logs(opts: {
     return;
   }
 
-  const count = parseInt(opts.lines, 10) || 50;
+  const count = parseInt(opts.lines, 10) || DEFAULT_LOG_LINES;
 
   // Read last N lines
   const content = readFileSync(logFile, "utf-8");
@@ -68,9 +70,8 @@ export async function logs(opts: {
     const tail = spawn("tail", ["-f", logFile], { stdio: "pipe" });
 
     if (!tail.stdout) {
-      console.error(`${chalk.red("Error:")} Failed to capture tail output stream.`);
+      error("Failed to capture tail output stream.");
       tail.kill();
-      process.exitCode = 1;
       return;
     }
 

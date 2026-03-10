@@ -72,6 +72,8 @@ export async function runVerificationCommands(
   return { success: true };
 }
 
+const VERIFICATION_OUTPUT_TRUNCATE_CHARS = 3000;
+
 export function buildVerificationFixPrompt(
   failedCommand: string,
   output: string,
@@ -86,7 +88,7 @@ export function buildVerificationFixPrompt(
     "",
     "**Error output:**",
     "```",
-    output.length > 3000 ? `[Output truncated to last 3000 chars]\n${output.slice(-3000)}` : output,
+    output.length > VERIFICATION_OUTPUT_TRUNCATE_CHARS ? `[Output truncated to last ${VERIFICATION_OUTPUT_TRUNCATE_CHARS} chars]\n${output.slice(-VERIFICATION_OUTPUT_TRUNCATE_CHARS)}` : output,
     "```",
     "",
     "Fix the code so this command passes. Do not modify the verification command itself.",

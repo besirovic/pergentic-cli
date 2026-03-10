@@ -1,6 +1,8 @@
 import type { Agent, AgentCommand, AgentOptions, AgentToolDef } from "./types";
 import { spawnAsync } from "../utils/process";
 
+const VERSION_CHECK_TIMEOUT_MS = 5000;
+
 export const OPENCODE_TOOLS: AgentToolDef[] = [
   { name: "edit", description: "Edit existing files", default: true },
   { name: "write", description: "Create new files", default: true },
@@ -35,7 +37,7 @@ export const opencode: Agent = {
 
   async isInstalled(): Promise<boolean> {
     try {
-      const result = await spawnAsync("opencode", ["--version"], { timeout: 5000 });
+      const result = await spawnAsync("opencode", ["--version"], { timeout: VERSION_CHECK_TIMEOUT_MS });
       return result.exitCode === 0;
     } catch {
       return false;

@@ -32,6 +32,8 @@ export interface RetryConfig {
   retryableStatuses: number[];
 }
 
+const RETRY_JITTER_MAX_MS = 500;
+
 const DEFAULT_RETRY_CONFIG: RetryConfig = {
   maxRetries: 3,
   baseDelayMs: 1000,
@@ -62,7 +64,7 @@ export async function fetchWithRetry(
         const retryAfter = response.headers.get("Retry-After");
         const delayMs = retryAfter
           ? parseInt(retryAfter, 10) * 1000
-          : config.baseDelayMs * Math.pow(2, attempt) + Math.random() * 500;
+          : config.baseDelayMs * Math.pow(2, attempt) + Math.random() * RETRY_JITTER_MAX_MS;
         await sleep(delayMs);
         continue;
       }
@@ -75,7 +77,7 @@ export async function fetchWithRetry(
 
       // Network error — retry if attempts remain
       if (attempt < config.maxRetries) {
-        const delayMs = config.baseDelayMs * Math.pow(2, attempt) + Math.random() * 500;
+        const delayMs = config.baseDelayMs * Math.pow(2, attempt) + Math.random() * RETRY_JITTER_MAX_MS;
         await sleep(delayMs);
         continue;
       }

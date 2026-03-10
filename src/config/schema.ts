@@ -2,6 +2,11 @@ import { z } from "zod";
 import { Cron } from "croner";
 import { BRANCH_TEMPLATE_VARS } from "../core/branch-constants";
 
+const DEFAULT_STATUS_PORT = 7890;
+const DEFAULT_POLL_INTERVAL_SECONDS = 30;
+const DEFAULT_AGENT_TIMEOUT_SECONDS = 3600;
+const DEFAULT_AGENT_RETRY_DELAY_SECONDS = 30;
+
 const NotificationChannelSchema = z.object({
 	webhook: z.string().url(),
 	on: z.object({
@@ -21,7 +26,7 @@ const DesktopNotificationSchema = z.object({
 
 const RemoteSchema = z.object({
 	host: z.string(),
-	port: z.number().default(7890),
+	port: z.number().default(DEFAULT_STATUS_PORT),
 });
 
 const NotificationsSchema = z.object({
@@ -42,9 +47,9 @@ export const ApiProvider = z.enum([
 ]);
 
 export const GlobalConfigSchema = z.object({
-	pollInterval: z.number().min(5).default(30),
+	pollInterval: z.number().min(5).default(DEFAULT_POLL_INTERVAL_SECONDS),
 	maxConcurrent: z.number().min(1).default(2),
-	statusPort: z.number().default(7890),
+	statusPort: z.number().default(DEFAULT_STATUS_PORT),
 	notifications: NotificationsSchema.optional(),
 	remotes: z.record(z.string(), RemoteSchema).optional(),
 });
@@ -56,7 +61,7 @@ const ClaudeOptionsSchema = z.object({
 	maxCostPerTask: z.number().optional(),
 	allowedTools: z.array(z.string()).optional(),
 	systemContext: z.string().optional(),
-	agentTimeout: z.number().min(60).default(3600).optional(),
+	agentTimeout: z.number().min(60).default(DEFAULT_AGENT_TIMEOUT_SECONDS).optional(),
 });
 
 const PRConfigSchema = z.object({
@@ -124,7 +129,7 @@ const VerificationConfigSchema = z.object({
 
 const AgentRetryConfigSchema = z.object({
 	maxRetries: z.number().min(0).max(10).default(0),
-	baseDelaySeconds: z.number().min(1).max(300).default(30),
+	baseDelaySeconds: z.number().min(1).max(300).default(DEFAULT_AGENT_RETRY_DELAY_SECONDS),
 });
 
 const SlackProjectConfigSchema = z.object({

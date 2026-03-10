@@ -1,6 +1,8 @@
 import type { Agent, AgentCommand, AgentOptions, AgentToolDef } from "./types";
 import { spawnAsync } from "../utils/process";
 
+const VERSION_CHECK_TIMEOUT_MS = 5000;
+
 export const CLAUDE_CODE_TOOLS: AgentToolDef[] = [
   { name: "Edit", description: "Edit existing files", default: true },
   { name: "Write", description: "Create new files", default: true },
@@ -36,7 +38,7 @@ export const claudeCode: Agent = {
 
   async isInstalled(): Promise<boolean> {
     try {
-      const result = await spawnAsync("claude", ["--version"], { timeout: 5000 });
+      const result = await spawnAsync("claude", ["--version"], { timeout: VERSION_CHECK_TIMEOUT_MS });
       return result.exitCode === 0;
     } catch {
       return false;

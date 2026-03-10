@@ -9,6 +9,8 @@ import { logger } from "../utils/logger";
 // Slack Socket Mode provider
 // Uses WebSocket connection (outbound only), no public URL needed
 
+const SLACK_TASK_TITLE_MAX_CHARS = 100;
+
 type ConnectionState = "disconnected" | "connecting" | "connected";
 
 interface SlackMessage {
@@ -138,7 +140,7 @@ export class SlackProvider implements TaskProvider {
 
 		this.pendingTasks.push({
 			id: `slack-${event.ts}`,
-			title: description.slice(0, 100),
+			title: description.slice(0, SLACK_TASK_TITLE_MAX_CHARS),
 			description,
 			source: "slack",
 			priority: 2,

@@ -1,9 +1,23 @@
 import { spawn } from "node:child_process";
-import chalk from "chalk";
+import { createServer } from "node:net";
 import { isRunning, readPid } from "../utils/health";
+import { error } from "../utils/ui";
 import { loadGlobalConfig } from "../config/loader";
 import { readState, type DaemonState } from "../utils/daemon-state";
 import { formatDuration } from "../utils/format";
+
+const TUNNEL_ESTABLISH_DELAY_MS = 2000;
+
+function getFreePort(): Promise<number> {
+	return new Promise((resolve, reject) => {
+		const srv = createServer();
+		srv.listen(0, () => {
+			const port = (srv.address() as { port: number }).port;
+			srv.close(() => resolve(port));
+		});
+		srv.on("error", reject);
+	});
+}
 
 function formatUptime(seconds: number): string {
 	const h = Math.floor(seconds / 3600);
@@ -16,12 +30,11 @@ async function fetchRemoteStatus(remoteName: string): Promise<void> {
 	const config = loadGlobalConfig();
 	const remote = config.remotes?.[remoteName];
 	if (!remote) {
-		console.error(`${chalk.red("Error:")} Remote "${remoteName}" not found in config.`);
-		process.exitCode = 1;
+		error(`Remote "${remoteName}" not found in config.`);
 		return;
 	}
 
-	const localPort = 17890;
+	const localPort = await getFreePort();
 	const tunnel = spawn("ssh", [
 		"-L",
 		`${localPort}:127.0.0.1:${remote.port}`,
@@ -32,15 +45,14 @@ async function fetchRemoteStatus(remoteName: string): Promise<void> {
 	]);
 
 	// Wait for tunnel to establish
-	await new Promise((r) => setTimeout(r, 2000));
+	await new Promise((r) => setTimeout(r, TUNNEL_ESTABLISH_DELAY_MS));
 
 	try {
 		const res = await fetch(`http://localhost:${localPort}/status`);
 		const state = (await res.json()) as DaemonState;
 		renderStatus(state, remoteName);
 	} catch {
-		console.error(`${chalk.red("Error:")} Failed to connect to remote "${remoteName}".`);
-		process.exitCode = 1;
+		error(`Failed to connect to remote "${remoteName}".`);
 	} finally {
 		tunnel.kill();
 	}
