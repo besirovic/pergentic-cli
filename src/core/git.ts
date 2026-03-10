@@ -1,6 +1,7 @@
 import simpleGit from "simple-git";
 import { logger } from "../utils/logger";
 import { fetchWithRetry } from "../utils/http";
+import { PR_BODY_OUTPUT_FILE } from "./pr-template";
 
 export function parseOwnerRepo(repo: string): { owner: string; repo: string } {
   // Handle SSH: git@github.com:owner/repo.git
@@ -35,7 +36,7 @@ export async function commitAll(
   message: string,
 ): Promise<void> {
   const git = simpleGit(worktreePath);
-  await git.add([".", ":!.claude-history.json"]);
+  await git.add([".", ":!.claude-history.json", `:!${PR_BODY_OUTPUT_FILE}`]);
   await git.commit(message);
   logger.info({ worktreePath, message }, "Committed changes");
 }
@@ -95,13 +96,16 @@ export async function createPR(
       },
     );
 
-    const existing = (await existingResponse.json()) as { html_url: string; number: number }[];
-    if (existing.length > 0) {
-      logger.info({ url: existing[0].html_url, prNumber: existing[0].number, branch: options.branch }, "PR already exists, skipping creation");
-      return { url: existing[0].html_url, number: existing[0].number };
+    const existing = (await existingResponse.json()) as unknown;
+    if (Array.isArray(existing) && existing.length > 0) {
+      const pr = existing[0] as Record<string, unknown>;
+      if (typeof pr.html_url === "string" && typeof pr.number === "number") {
+        logger.info({ url: pr.html_url, prNumber: pr.number, branch: options.branch }, "PR already exists, skipping creation");
+        return { url: pr.html_url, number: pr.number };
+      }
     }
-  } catch {
-    // If checking existing PRs fails, proceed to create a new one
+  } catch (err) {
+    logger.warn({ err, branch: options.branch }, "Failed to check for existing PRs, proceeding to create");
   }
 
   const response = await fetchWithRetry(
@@ -123,13 +127,17 @@ export async function createPR(
     { retryableStatuses: [429, 500, 502, 503, 504] },
   );
 
-  const data = (await response.json()) as { html_url: string; number: number };
+  const data = (await response.json()) as unknown;
+  const prData = data as Record<string, unknown>;
+  if (typeof prData.html_url !== "string" || typeof prData.number !== "number") {
+    throw new Error(`Unexpected GitHub API response when creating PR: ${JSON.stringify(data)}`);
+  }
 
   // Add labels if specified
   if (options.labels?.length) {
     try {
       await fetchWithRetry(
-        `https://api.github.com/repos/${owner}/${repo}/issues/${data.number}/labels`,
+        `https://api.github.com/repos/${owner}/${repo}/issues/${prData.number}/labels`,
         {
           method: "POST",
           headers: {
@@ -149,7 +157,7 @@ export async function createPR(
   if (options.reviewers?.length) {
     try {
       await fetchWithRetry(
-        `https://api.github.com/repos/${owner}/${repo}/pulls/${data.number}/requested_reviewers`,
+        `https://api.github.com/repos/${owner}/${repo}/pulls/${prData.number}/requested_reviewers`,
         {
           method: "POST",
           headers: {
@@ -165,8 +173,8 @@ export async function createPR(
     }
   }
 
-  logger.info({ url: data.html_url, prNumber: data.number, branch: options.branch }, "Created PR");
-  return { url: data.html_url, number: data.number };
+  logger.info({ url: prData.html_url, prNumber: prData.number, branch: options.branch }, "Created PR");
+  return { url: prData.html_url as string, number: prData.number as number };
 }
 
 export async function replyToPRComment(
@@ -177,7 +185,7 @@ export async function replyToPRComment(
 ): Promise<void> {
   const { owner, repo: repoName } = parseOwnerRepo(repo);
 
-  await fetchWithRetry(
+  const response = await fetchWithRetry(
     `https://api.github.com/repos/${owner}/${repoName}/issues/${prNumber}/comments`,
     {
       method: "POST",
@@ -189,6 +197,12 @@ export async function replyToPRComment(
       body: JSON.stringify({ body }),
     },
   );
+
+  const data = (await response.json()) as unknown;
+  const comment = data as Record<string, unknown>;
+  if (typeof comment.id !== "number") {
+    throw new Error(`Unexpected GitHub API response when creating comment: ${JSON.stringify(data)}`);
+  }
 }
 
 export async function getChangeSummary(
