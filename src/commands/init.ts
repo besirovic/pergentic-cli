@@ -226,6 +226,12 @@ const allAgents: { name: string; value: AgentNameType }[] = [
 	{ name: "OpenCode", value: "opencode" },
 ];
 
+const VALID_AGENT_NAMES = new Set<string>(allAgents.map((a) => a.value));
+
+function isValidAgentName(name: string): name is AgentNameType {
+	return VALID_AGENT_NAMES.has(name);
+}
+
 function agentDisplayName(agent: AgentNameType): string {
 	return allAgents.find((a) => a.value === agent)?.name ?? agent;
 }
@@ -879,9 +885,9 @@ export async function init(projectPath?: string): Promise<void> {
 
 	if (config.agentTools) {
 		for (const [agentName, tools] of Object.entries(config.agentTools)) {
-			if (tools.length > 0) {
+			if (tools.length > 0 && isValidAgentName(agentName)) {
 				console.log(
-					`  ${chalk.green("✓")} ${agentDisplayName(agentName as AgentNameType)} tools: ${chalk.white(tools.join(", "))}`
+					`  ${chalk.green("✓")} ${agentDisplayName(agentName)} tools: ${chalk.white(tools.join(", "))}`
 				);
 			}
 		}
@@ -889,9 +895,9 @@ export async function init(projectPath?: string): Promise<void> {
 
 	if (config.agentLabels) {
 		for (const [agentName, labels] of Object.entries(config.agentLabels)) {
-			if (labels.length > 0) {
+			if (labels.length > 0 && isValidAgentName(agentName)) {
 				console.log(
-					`  ${chalk.green("✓")} ${agentDisplayName(agentName as AgentNameType)} labels: ${chalk.white(labels.join(", "))}`
+					`  ${chalk.green("✓")} ${agentDisplayName(agentName)} labels: ${chalk.white(labels.join(", "))}`
 				);
 			}
 		}
@@ -900,10 +906,10 @@ export async function init(projectPath?: string): Promise<void> {
 	if (config.modelLabels) {
 		for (const [agentName, labelMap] of Object.entries(config.modelLabels)) {
 			const entries = Object.entries(labelMap);
-			if (entries.length > 0) {
+			if (entries.length > 0 && isValidAgentName(agentName)) {
 				const display = entries.map(([l, m]) => `${l}→${m}`).join(", ");
 				console.log(
-					`  ${chalk.green("✓")} ${agentDisplayName(agentName as AgentNameType)} model labels: ${chalk.white(display)}`
+					`  ${chalk.green("✓")} ${agentDisplayName(agentName)} model labels: ${chalk.white(display)}`
 				);
 			}
 		}
@@ -946,14 +952,14 @@ export async function init(projectPath?: string): Promise<void> {
 	console.log();
 
 	// Extract secrets from config and write to .env file
-	const { secrets, cleaned } = extractSecrets(config as unknown as Record<string, unknown>);
+	const { secrets, cleaned } = extractSecrets(config);
 	if (Object.keys(secrets).length > 0) {
 		saveProjectEnv(absPath, secrets);
 		console.log(`  ${chalk.green("✓")} Secrets saved to ${chalk.dim(".pergentic/.env")}`);
 	}
 
 	// Save project config without secrets
-	saveProjectConfig(absPath, cleaned as unknown as ProjectConfig);
+	saveProjectConfig(absPath, cleaned);
 
 	// Create default prompt template if it doesn't exist
 	const templateFilename = config.promptTemplate?.path ?? "PROMPT.md";

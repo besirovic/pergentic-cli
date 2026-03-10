@@ -20,7 +20,7 @@ interface BasePayload {
   taskId: string;
   title: string;
   description: string;
-  source: "linear" | "github" | "slack" | "schedule";
+  source: "linear" | "github" | "jira" | "slack" | "schedule";
   metadata?: Record<string, unknown>;
   labels?: string[];
   targetAgents?: string[];

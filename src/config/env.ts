@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { envFilePath, projectEnvPath, projectConfigPath } from "./paths";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { logger } from "../utils/logger";
+import type { ProjectConfig } from "./schema";
 
 export interface ResolvedSecrets {
   anthropicApiKey?: string;
@@ -195,8 +196,8 @@ export function migrateConfigSecrets(
 }
 
 export function extractSecrets(
-  config: Record<string, unknown>,
-): { secrets: ResolvedSecrets; cleaned: Record<string, unknown> } {
+  config: ProjectConfig,
+): { secrets: ResolvedSecrets; cleaned: ProjectConfig } {
   const secrets: ResolvedSecrets = {};
   const cleaned = { ...config };
   const secretKeys = Object.keys(SECRET_FIELDS) as (keyof ResolvedSecrets)[];

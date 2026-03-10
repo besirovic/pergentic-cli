@@ -291,6 +291,8 @@ describe("extractSecrets", () => {
     const config = {
       repo: "git@github.com:user/repo.git",
       branch: "main",
+      agent: "claude-code" as const,
+      configuredAgents: ["claude-code" as const],
       anthropicApiKey: "sk-ant-extract",
       githubToken: "ghp_extract",
     };
@@ -306,7 +308,12 @@ describe("extractSecrets", () => {
   });
 
   it("returns empty secrets when none present", () => {
-    const config = { repo: "git@github.com:user/repo.git", branch: "main" };
+    const config = {
+      repo: "git@github.com:user/repo.git",
+      branch: "main",
+      agent: "claude-code" as const,
+      configuredAgents: ["claude-code" as const],
+    };
     const { secrets, cleaned } = extractSecrets(config);
     expect(secrets).toEqual({});
     expect(cleaned).toEqual(config);
