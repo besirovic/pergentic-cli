@@ -100,6 +100,22 @@ describe("TaskQueue", () => {
     expect(q.add(makeTask("a", TaskPriority.NEW))).toBe(false);
   });
 
+  it("isKnownFailed returns true for failed tasks", () => {
+    const q = new TaskQueue();
+    q.markFailed("a");
+    expect(q.isKnownFailed("a")).toBe(true);
+  });
+
+  it("isKnownFailed returns false for non-failed tasks", () => {
+    const q = new TaskQueue();
+    expect(q.isKnownFailed("a")).toBe(false);
+  });
+
+  it("remove returns false for non-existent id", () => {
+    const q = new TaskQueue();
+    expect(q.remove("nonexistent")).toBe(false);
+  });
+
   it("lists active tasks", () => {
     const q = new TaskQueue();
     q.add(makeTask("a", TaskPriority.FEEDBACK));
@@ -107,5 +123,21 @@ describe("TaskQueue", () => {
     const active = q.active();
     expect(active).toHaveLength(2);
     expect(active[0].id).toBe("a");
+  });
+
+  it("active returns a copy, not the internal array", () => {
+    const q = new TaskQueue();
+    q.add(makeTask("a", TaskPriority.NEW));
+    const active = q.active();
+    active.pop();
+    expect(q.length).toBe(1);
+  });
+
+  it("clear does not reset failed set", () => {
+    const q = new TaskQueue();
+    q.markFailed("a");
+    q.clear();
+    expect(q.isKnownFailed("a")).toBe(true);
+    expect(q.add(makeTask("a", TaskPriority.NEW))).toBe(false);
   });
 });
