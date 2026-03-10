@@ -40,6 +40,27 @@ export function buildSafeEnv(
   return { ...safe, ...overrides };
 }
 
+const MAX_OUTPUT = 8192;
+const TRUNCATION_PREFIX = "[Output truncated to last 8KB]\n";
+
+function capBuffer(
+  chunks: Buffer[],
+  len: number,
+): { chunks: Buffer[]; len: number; truncated: boolean } {
+  let truncated = false;
+  while (len > MAX_OUTPUT && chunks.length > 1) {
+    len -= chunks.shift()!.length;
+    truncated = true;
+  }
+  if (chunks.length === 1 && len > MAX_OUTPUT) {
+    const single = chunks[0];
+    chunks[0] = single.subarray(single.length - MAX_OUTPUT);
+    len = MAX_OUTPUT;
+    truncated = true;
+  }
+  return { chunks, len, truncated };
+}
+
 export function spawnAsync(
   command: string,
   args: string[],
@@ -54,15 +75,27 @@ export function spawnAsync(
 
     const child = spawn(command, args, spawnOpts);
 
-    let stdout = "";
-    let stderr = "";
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    let stdoutLen = 0;
+    let stderrLen = 0;
+    let stdoutTruncated = false;
+    let stderrTruncated = false;
     let timedOut = false;
 
-    child.stdout?.on("data", (data: Buffer) => {
-      stdout += data.toString();
+    child.stdout?.on("data", (chunk: Buffer) => {
+      stdoutChunks.push(chunk);
+      stdoutLen += chunk.length;
+      const capped = capBuffer(stdoutChunks, stdoutLen);
+      stdoutLen = capped.len;
+      if (capped.truncated) stdoutTruncated = true;
     });
-    child.stderr?.on("data", (data: Buffer) => {
-      stderr += data.toString();
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderrChunks.push(chunk);
+      stderrLen += chunk.length;
+      const capped = capBuffer(stderrChunks, stderrLen);
+      stderrLen = capped.len;
+      if (capped.truncated) stderrTruncated = true;
     });
 
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -84,7 +117,13 @@ export function spawnAsync(
         reject(new Error(`Process timed out after ${opts.timeout}ms`));
         return;
       }
-      resolve({ exitCode: exitCode ?? 1, stdout, stderr });
+      const stdout = Buffer.concat(stdoutChunks).toString();
+      const stderr = Buffer.concat(stderrChunks).toString();
+      resolve({
+        exitCode: exitCode ?? 1,
+        stdout: stdoutTruncated ? TRUNCATION_PREFIX + stdout : stdout,
+        stderr: stderrTruncated ? TRUNCATION_PREFIX + stderr : stderr,
+      });
     });
   });
 }
