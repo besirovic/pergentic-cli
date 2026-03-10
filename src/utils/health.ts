@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, openSync, closeSync, unlinkSync, existsSync } from "node:fs";
 import { daemonPidPath, daemonLockPath } from "../config/paths";
+import { logger } from "./logger";
 
 export function writePid(pid: number): void {
   writeFileSync(daemonPidPath(), String(pid), "utf-8");
@@ -41,14 +42,21 @@ export function removePid(): void {
  */
 export function acquireLock(): boolean {
   const lockFile = daemonLockPath();
-  try {
-    const fd = openSync(lockFile, "wx");
-    writeFileSync(fd, String(process.pid), "utf-8");
-    closeSync(fd);
-    return true;
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === "EEXIST") {
-      // Lock file exists — check if the process that created it is still alive
+  const maxAttempts = 3;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const fd = openSync(lockFile, "wx");
+      writeFileSync(fd, String(process.pid), "utf-8");
+      closeSync(fd);
+      return true;
+    } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== "EEXIST") {
+        logger.error({ err }, "Failed to acquire lock file");
+        return false;
+      }
+      // Lock file exists — check if the holding process is still alive
       try {
         const lockPid = parseInt(readFileSync(lockFile, "utf-8").trim(), 10);
         if (!Number.isNaN(lockPid)) {
@@ -56,13 +64,18 @@ export function acquireLock(): boolean {
           return false; // process is alive, lock is valid
         }
       } catch {
-        // Process is dead or PID unreadable — stale lock, remove and retry
+        // Process is dead or PID unreadable — stale lock
       }
-      unlinkSync(lockFile);
-      return acquireLock();
+      try {
+        unlinkSync(lockFile);
+      } catch {
+        // Another process may have already removed it; retry will handle it
+      }
     }
-    return false;
   }
+
+  logger.warn("Failed to acquire lock after %d attempts", maxAttempts);
+  return false;
 }
 
 export function releaseLock(): void {
