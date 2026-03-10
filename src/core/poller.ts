@@ -234,12 +234,14 @@ export class Poller {
   }
 
   private async dispatch(): Promise<void> {
+    const registry = loadProjectsRegistry();
+
     while (this.runner.availableSlots > 0 && this.queue.length > 0) {
       const task = this.queue.next();
       if (!task) break;
 
       try {
-        const projectPath = loadProjectsRegistry().projects.find(
+        const projectPath = registry.projects.find(
           (p) => basename(p.path) === task.project,
         )?.path ?? "";
         const projectConfig = getCachedProjectConfig(projectPath);
