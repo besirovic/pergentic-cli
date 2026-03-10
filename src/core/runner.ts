@@ -21,6 +21,7 @@ import simpleGit from "simple-git";
 
 const MAX_ERROR_SNIPPET_CHARS = 2000;
 const MAX_ERROR_DETAIL_CHARS = 500;
+const SIGKILL_DELAY_MS = 10_000;
 
 export interface TaskCompletedMeta {
   duration: number;
@@ -446,6 +447,18 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
 
     active.abortController.abort();
     active.process?.kill("SIGTERM");
+
+    const proc = active.process;
+    if (proc) {
+      setTimeout(() => {
+        try {
+          proc.kill("SIGKILL");
+        } catch {
+          /* already dead */
+        }
+      }, SIGKILL_DELAY_MS);
+    }
+
     this.active.delete(taskId);
     return true;
   }
