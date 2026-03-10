@@ -103,6 +103,12 @@ export class TaskQueue {
     return this.seen.has(id);
   }
 
+  hasScheduleId(scheduleId: string): boolean {
+    return this.tasks.some(
+      (t) => t.type === "scheduled" && "scheduleId" in t.payload && t.payload.scheduleId === scheduleId,
+    );
+  }
+
   get length(): number {
     return this.tasks.length;
   }

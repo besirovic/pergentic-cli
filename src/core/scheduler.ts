@@ -12,6 +12,7 @@ export class Scheduler {
 	private runner: TaskRunner;
 	private active = new Set<string>();
 	private checking = false;
+	private lastDispatched = new Map<string, number>();
 
 	constructor(queue: TaskQueue, runner: TaskRunner) {
 		this.queue = queue;
@@ -42,6 +43,10 @@ export class Scheduler {
 					if (this.active.has(schedule.id)) continue;
 
 					if (this.isDue(schedule, now)) {
+						if (this.queue.hasScheduleId(schedule.id)) {
+							logger.debug({ scheduleId: schedule.id }, "Schedule already in queue, skipping");
+							continue;
+						}
 						this.active.add(schedule.id);
 						await this.dispatchSchedule(entry.path, projectName, schedule, now);
 					}
@@ -115,7 +120,15 @@ export class Scheduler {
 			};
 
 			if (this.queue.add(task)) {
-				updateLastRun(projectPath, schedule.id, timestamp);
+				try {
+					updateLastRun(projectPath, schedule.id, timestamp);
+				} catch (err) {
+					logger.error({ scheduleId: schedule.id, err }, "Failed to persist lastRun, removing task to prevent stale dispatch");
+					this.queue.remove(taskId);
+					this.active.delete(schedule.id);
+					return;
+				}
+				this.lastDispatched.set(schedule.id, now.getTime());
 				logger.info({ scheduleId: schedule.id, taskId, project: projectName }, "Queued scheduled prompt task");
 			} else {
 				this.active.delete(schedule.id);
@@ -147,7 +160,15 @@ export class Scheduler {
 			};
 
 			if (this.queue.add(task)) {
-				updateLastRun(projectPath, schedule.id, timestamp);
+				try {
+					updateLastRun(projectPath, schedule.id, timestamp);
+				} catch (err) {
+					logger.error({ scheduleId: schedule.id, err }, "Failed to persist lastRun, removing task to prevent stale dispatch");
+					this.queue.remove(taskId);
+					this.active.delete(schedule.id);
+					return;
+				}
+				this.lastDispatched.set(schedule.id, now.getTime());
 				logger.info({ scheduleId: schedule.id, taskId, project: projectName }, "Queued scheduled command task");
 			} else {
 				this.active.delete(schedule.id);

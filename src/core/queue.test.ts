@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { TaskQueue, TaskPriority, type Task } from "./queue";
 
-function makeTask(id: string, priority: TaskPriority, type: "new" | "feedback" | "retry" = "new"): Task {
+function makeTask(id: string, priority: TaskPriority, type: "new" | "feedback" | "retry" | "scheduled" = "new"): Task {
   return {
     id,
     project: "test-project",
@@ -13,6 +13,23 @@ function makeTask(id: string, priority: TaskPriority, type: "new" | "feedback" |
       title: `Task ${id}`,
       description: "Test task",
       source: "github",
+    },
+  };
+}
+
+function makeScheduledTask(id: string, scheduleId: string): Task {
+  return {
+    id,
+    project: "test-project",
+    priority: TaskPriority.SCHEDULED,
+    type: "scheduled",
+    createdAt: Date.now(),
+    payload: {
+      taskId: id,
+      title: `Scheduled ${id}`,
+      description: "Scheduled task",
+      source: "schedule",
+      scheduleId,
     },
   };
 }
@@ -139,5 +156,40 @@ describe("TaskQueue", () => {
     q.clear();
     expect(q.isKnownFailed("a")).toBe(true);
     expect(q.add(makeTask("a", TaskPriority.NEW))).toBe(false);
+  });
+
+  describe("hasScheduleId", () => {
+    it("returns true when a task with the schedule ID is in the queue", () => {
+      const q = new TaskQueue();
+      q.add(makeScheduledTask("sched-1-123", "daily-sync"));
+      expect(q.hasScheduleId("daily-sync")).toBe(true);
+    });
+
+    it("returns false when no task with the schedule ID is in the queue", () => {
+      const q = new TaskQueue();
+      q.add(makeTask("a", TaskPriority.NEW));
+      expect(q.hasScheduleId("daily-sync")).toBe(false);
+    });
+
+    it("returns false after the scheduled task is consumed", () => {
+      const q = new TaskQueue();
+      q.add(makeScheduledTask("sched-1-123", "daily-sync"));
+      q.next();
+      expect(q.hasScheduleId("daily-sync")).toBe(false);
+    });
+
+    it("returns false after the scheduled task is removed", () => {
+      const q = new TaskQueue();
+      q.add(makeScheduledTask("sched-1-123", "daily-sync"));
+      q.remove("sched-1-123");
+      expect(q.hasScheduleId("daily-sync")).toBe(false);
+    });
+
+    it("ignores non-scheduled tasks", () => {
+      const q = new TaskQueue();
+      q.add(makeTask("a", TaskPriority.NEW));
+      q.add(makeTask("b", TaskPriority.FEEDBACK, "feedback"));
+      expect(q.hasScheduleId("a")).toBe(false);
+    });
   });
 });
