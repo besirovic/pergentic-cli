@@ -1,9 +1,15 @@
-import simpleGit from "simple-git";
+import simpleGit, { type SimpleGitOptions } from "simple-git";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { createHash } from "node:crypto";
 import { worktreesDir, repoDir } from "../config/paths";
 import { logger } from "../utils/logger";
+
+const GIT_TIMEOUT_MS = 60_000;
+
+const gitOpts: Partial<SimpleGitOptions> = {
+  timeout: { block: GIT_TIMEOUT_MS },
+};
 
 export function slugify(text: string): string {
   const slug = text
@@ -33,7 +39,7 @@ export async function ensureRepoClone(
   if (!existsSync(parentDir)) mkdirSync(parentDir, { recursive: true });
 
   logger.info({ projectName, repo, remoteUrl }, "Cloning repo for worktree use");
-  const git = simpleGit();
+  const git = simpleGit({ ...gitOpts });
   await git.clone(remoteUrl, repo, ["--branch", baseBranch]);
 
   return repo;
@@ -64,7 +70,7 @@ export async function createWorktree(
     // Read actual branch from existing worktree instead of assuming current template
     let existingBranch = branchName;
     try {
-      const wtGit = simpleGit(worktreePath);
+      const wtGit = simpleGit({ baseDir: worktreePath, ...gitOpts });
       const rev = await wtGit.revparse(["--abbrev-ref", "HEAD"]);
       if (rev.trim()) existingBranch = rev.trim();
     } catch {
@@ -74,7 +80,7 @@ export async function createWorktree(
     return { path: worktreePath, branch: existingBranch, taskId };
   }
 
-  const git = simpleGit(repo);
+  const git = simpleGit({ baseDir: repo, ...gitOpts });
 
   // Pull latest from base branch
   try {
@@ -95,7 +101,7 @@ export async function removeWorktree(
   worktreePath: string,
 ): Promise<void> {
   const repo = repoDir(projectName);
-  const git = simpleGit(repo);
+  const git = simpleGit({ baseDir: repo, ...gitOpts });
 
   try {
     await git.raw(["worktree", "remove", worktreePath, "--force"]);
