@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, existsSync, openSync, writeSync, fsyncSync, closeSync, renameSync } from "node:fs";
-import { readFile, writeFile, rename, open } from "node:fs/promises";
+import { readFileSync, existsSync, openSync, writeSync, fsyncSync, closeSync, renameSync } from "node:fs";
+import { readFile, rename, open } from "node:fs/promises";
 import type { z } from "zod";
 import { logger } from "./logger";
 
@@ -7,13 +7,25 @@ let writeCounter = 0;
 
 export function atomicWriteFile(filePath: string, data: string): void {
   const tmpPath = `${filePath}.${process.pid}.${writeCounter++}.tmp`;
-  writeFileSync(tmpPath, data, "utf-8");
+  const fd = openSync(tmpPath, "w");
+  try {
+    writeSync(fd, data, 0, "utf-8");
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
   renameSync(tmpPath, filePath);
 }
 
 export async function atomicWriteFileAsync(filePath: string, data: string): Promise<void> {
   const tmpPath = `${filePath}.${process.pid}.${writeCounter++}.tmp`;
-  await writeFile(tmpPath, data, "utf-8");
+  const fh = await open(tmpPath, "w");
+  try {
+    await fh.write(data, 0, "utf-8");
+    await fh.sync();
+  } finally {
+    await fh.close();
+  }
   await rename(tmpPath, filePath);
 }
 
