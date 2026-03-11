@@ -55,7 +55,10 @@ export function acquireLock(): boolean {
       }
       return true;
     } catch (err: unknown) {
-      const code = (err as NodeJS.ErrnoException).code;
+      const code =
+        err instanceof Error && "code" in err
+          ? (err as NodeJS.ErrnoException).code
+          : undefined;
       if (code !== "EEXIST") {
         logger.error({ err }, "Failed to acquire lock file");
         return false;
