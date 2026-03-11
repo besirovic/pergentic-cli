@@ -182,6 +182,31 @@ describe("daemon-server", () => {
 		expect(actionRes.status).toBe(200);
 	});
 
+	it("enforces rate limit exactly: allows N requests and blocks the N+1th concurrently", async () => {
+		await startServer((s) => {
+			s.post("/action", (_body, res) => {
+				res.writeHead(200).end("ok");
+			});
+		});
+
+		const LIMIT = 30; // ACTION_RATE_LIMIT
+
+		// Fire all requests simultaneously (no awaiting between them)
+		const results = await Promise.all(
+			Array.from({ length: LIMIT + 5 }, () => request(port, "POST", "/action", "{}")),
+		);
+
+		const allowed = results.filter((r) => r.status === 200);
+		const blocked = results.filter((r) => r.status === 429);
+
+		expect(allowed.length).toBe(LIMIT);
+		expect(blocked.length).toBe(5);
+		for (const b of blocked) {
+			expect(b.headers["x-ratelimit-remaining"]).toBe("0");
+			expect(Number(b.headers["retry-after"])).toBeGreaterThan(0);
+		}
+	});
+
 	it("abortPending destroys in-flight responses and causes no unhandled rejections", async () => {
 		let capturedSignal: AbortSignal | undefined;
 		let capturedRes: http.ServerResponse | undefined;

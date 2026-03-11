@@ -103,17 +103,17 @@ export function createDaemonServer(): {
     const limit = method === "GET" ? STATUS_RATE_LIMIT : ACTION_RATE_LIMIT;
     const key = getRateLimitKey(ip, method);
     const now = Date.now();
-    let entry = rateLimitState.get(key);
+    const existing = rateLimitState.get(key);
 
-    if (!entry || now - entry.windowStart > RATE_WINDOW_MS) {
-      entry = { count: 0, windowStart: now };
-      rateLimitState.set(key, entry);
-    }
+    // Atomic: compute new state in one pass before writing, so no partial state is
+    // ever visible between the expiry check and the counter update.
+    const withinWindow = existing !== undefined && now - existing.windowStart <= RATE_WINDOW_MS;
+    const windowStart = withinWindow ? existing!.windowStart : now;
+    const count = withinWindow ? existing!.count + 1 : 1;
+    rateLimitState.set(key, { count, windowStart });
 
-    entry.count++;
-
-    if (entry.count > limit) {
-      const retryAfter = Math.ceil((entry.windowStart + RATE_WINDOW_MS - now) / 1000);
+    if (count > limit) {
+      const retryAfter = Math.ceil((windowStart + RATE_WINDOW_MS - now) / 1000);
       res.writeHead(429, {
         "Retry-After": String(retryAfter),
         "X-RateLimit-Remaining": "0",
