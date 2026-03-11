@@ -179,17 +179,19 @@ export function saveProjectEnv(
   invalidateConfigCache(projectPath);
 }
 
+function isYamlObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 export function migrateConfigSecrets(
   projectPath: string,
 ): { migrated: boolean; fields: string[] } {
   const configFile = projectConfigPath(projectPath);
   if (!existsSync(configFile)) return { migrated: false, fields: [] };
 
-  const raw = parseYaml(readFileSync(configFile, "utf-8")) as Record<
-    string,
-    unknown
-  >;
-  if (!raw) return { migrated: false, fields: [] };
+  const parsed: unknown = parseYaml(readFileSync(configFile, "utf-8"));
+  if (!isYamlObject(parsed)) return { migrated: false, fields: [] };
+  const raw = parsed;
 
   const secretKeys = Object.keys(SECRET_FIELDS) as (keyof ResolvedSecrets)[];
   const extracted: ResolvedSecrets = {};

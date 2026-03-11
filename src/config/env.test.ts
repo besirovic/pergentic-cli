@@ -273,6 +273,12 @@ describe("migrateConfigSecrets", () => {
     expect(result).toEqual({ migrated: false, fields: [] });
   });
 
+  it("returns not migrated for empty YAML file", () => {
+    writeFileSync(join(TEST_PROJECT, ".pergentic", "config.yaml"), "");
+    const result = migrateConfigSecrets(TEST_PROJECT);
+    expect(result).toEqual({ migrated: false, fields: [] });
+  });
+
   it("migrates secrets from config.yaml to .env", () => {
     const config = {
       repo: "git@github.com:user/repo.git",
