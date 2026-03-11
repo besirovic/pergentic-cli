@@ -13,7 +13,7 @@ import {
   projectConfigPath,
   globalConfigDir,
 } from "./paths";
-import { loadSecrets, SECRET_FIELDS, type ResolvedSecrets } from "./env";
+import { loadSecrets, SECRET_FIELDS, validateSecretValue, type ResolvedSecrets } from "./env";
 import { readYaml, writeYaml } from "./yaml-io";
 import { logger } from "../utils/logger";
 
@@ -50,6 +50,18 @@ export function loadProjectConfig(projectPath: string): ProjectConfig {
   }
 
   const config = ProjectConfigSchema.parse(raw);
+
+  // Validate any secrets present in config.yaml
+  for (const field of Object.keys(SECRET_FIELDS)) {
+    const key = field as keyof ResolvedSecrets;
+    const value = config[key];
+    if (typeof value === "string" && value.length > 0) {
+      if (!validateSecretValue(key, value)) {
+        logger.warn(`Rejecting invalid ${key} from config.yaml`);
+        delete (config as Record<string, unknown>)[key];
+      }
+    }
+  }
 
   // Merge env-based secrets: config values take precedence (backwards compat)
   const secrets = loadSecrets(projectPath);

@@ -83,6 +83,17 @@ function isPlaceholder(value: string): boolean {
   return PLACEHOLDER_PATTERNS.some((p) => p.test(value));
 }
 
+export function validateSecretValue(
+  field: keyof ResolvedSecrets,
+  value: string,
+): boolean {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return false;
+  if (isPlaceholder(trimmed)) return false;
+  if (!validateSecretFormat(field, trimmed)) return false;
+  return true;
+}
+
 function validateSecretFormat(
   field: keyof ResolvedSecrets,
   value: string,
