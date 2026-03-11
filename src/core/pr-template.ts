@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import { logger } from "../utils/logger";
@@ -70,6 +70,21 @@ async function readSafeTemplate(filePath: string): Promise<string> {
 }
 
 /**
+ * Check whether filePath is safely within repoRoot after resolving all symlinks.
+ * Returns false if the resolved path escapes the repo root or if resolution fails.
+ */
+function isPathWithinRoot(filePath: string, repoRoot: string): boolean {
+	try {
+		const realFile = realpathSync(filePath);
+		const realRoot = realpathSync(repoRoot);
+		const boundary = realRoot + sep;
+		return realFile.startsWith(boundary) || realFile === realRoot;
+	} catch {
+		return false;
+	}
+}
+
+/**
  * Detect and read a PR template from the repository.
  * Checks standard GitHub template locations and an optional explicit path.
  *
@@ -91,8 +106,15 @@ export async function detectPRTemplate(
 				"PR template path escapes repository root, ignoring",
 			);
 		} else if (existsSync(full)) {
-			logger.info({ path: explicitPath }, "Using configured PR template");
-			return readSafeTemplate(full);
+			if (!isPathWithinRoot(full, repoRoot)) {
+				logger.warn(
+					{ path: explicitPath },
+					"PR template path resolves via symlink outside repository root, ignoring",
+				);
+			} else {
+				logger.info({ path: explicitPath }, "Using configured PR template");
+				return readSafeTemplate(full);
+			}
 		} else {
 			logger.warn(
 				{ path: explicitPath },
@@ -105,6 +127,10 @@ export async function detectPRTemplate(
 	for (const relPath of PR_TEMPLATE_PATHS) {
 		const full = join(repoRoot, relPath);
 		if (existsSync(full)) {
+			if (!isPathWithinRoot(full, repoRoot)) {
+				logger.warn({ path: relPath }, "Auto-detected PR template is a symlink escaping repo root, skipping");
+				continue;
+			}
 			logger.info({ path: relPath }, "Using auto-detected PR template");
 			return readSafeTemplate(full);
 		}
@@ -119,8 +145,12 @@ export async function detectPRTemplate(
 				.sort();
 			if (files.length > 0) {
 				const picked = join(templateDir, files[0]);
-				logger.info({ path: `.github/PULL_REQUEST_TEMPLATE/${files[0]}` }, "Using auto-detected PR template from directory");
-				return readSafeTemplate(picked);
+				if (!isPathWithinRoot(picked, repoRoot)) {
+					logger.warn({ path: `.github/PULL_REQUEST_TEMPLATE/${files[0]}` }, "PR template in directory is a symlink escaping repo root, ignoring");
+				} else {
+					logger.info({ path: `.github/PULL_REQUEST_TEMPLATE/${files[0]}` }, "Using auto-detected PR template from directory");
+					return readSafeTemplate(picked);
+				}
 			}
 		} catch (err) {
 			logger.warn({ err, path: templateDir }, "Failed to read PR template directory");

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, existsSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import {
 	detectPRTemplate,
@@ -75,6 +75,28 @@ describe("detectPRTemplate", () => {
 
 	it("rejects path traversal in explicit path", async () => {
 		expect(await detectPRTemplate(TEST_DIR, "../../etc/passwd")).toBeNull();
+	});
+
+	it("rejects symlink pointing outside repo root via explicit path", async () => {
+		const outsideFile = join("/tmp", `pergentic-symlink-target-${process.pid}.md`);
+		writeFileSync(outsideFile, "secret content");
+		try {
+			symlinkSync(outsideFile, join(TEST_DIR, "escape.md"));
+			expect(await detectPRTemplate(TEST_DIR, "escape.md")).toBeNull();
+		} finally {
+			rmSync(outsideFile, { force: true });
+		}
+	});
+
+	it("rejects auto-detected template that is a symlink outside repo root", async () => {
+		const outsideFile = join("/tmp", `pergentic-symlink-auto-${process.pid}.md`);
+		writeFileSync(outsideFile, "secret auto content");
+		try {
+			symlinkSync(outsideFile, join(TEST_DIR, "PULL_REQUEST_TEMPLATE.md"));
+			expect(await detectPRTemplate(TEST_DIR)).toBeNull();
+		} finally {
+			rmSync(outsideFile, { force: true });
+		}
 	});
 
 	it("truncates templates exceeding size limit", async () => {
