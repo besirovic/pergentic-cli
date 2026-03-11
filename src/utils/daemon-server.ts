@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
+import type { ZodType } from "zod";
 
 const MAX_BODY_BYTES = 1_048_576; // 1 MB
 
@@ -23,6 +24,32 @@ interface RateLimitEntry {
 
 function getRateLimitKey(ip: string, method: string): string {
   return `${ip}:${method}`;
+}
+
+/**
+ * Parse a JSON request body and validate it against a Zod schema.
+ * Sends a 400 response on failure and returns null so the caller can simply `return`.
+ */
+export function parseJsonBody<T>(body: string, schema: ZodType<T>, res: ServerResponse): T | null {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(body);
+  } catch {
+    res.writeHead(400, { "Content-Type": "application/json" }).end(
+      JSON.stringify({ error: "Invalid JSON" }),
+    );
+    return null;
+  }
+
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) {
+    res.writeHead(400, { "Content-Type": "application/json" }).end(
+      JSON.stringify({ error: parsed.error.issues.map((i) => i.message).join("; ") }),
+    );
+    return null;
+  }
+
+  return parsed.data;
 }
 
 export function createDaemonServer(): {

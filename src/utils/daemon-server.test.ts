@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import http from "node:http";
-import { createDaemonServer } from "./daemon-server";
+import { z } from "zod";
+import { createDaemonServer, parseJsonBody } from "./daemon-server";
 
 function request(
 	port: number,
@@ -179,5 +180,67 @@ describe("daemon-server", () => {
 		}
 		const actionRes = await request(port, "POST", "/retry", "{}");
 		expect(actionRes.status).toBe(200);
+	});
+});
+
+describe("parseJsonBody", () => {
+	const TestSchema = z.object({
+		name: z.string().min(1),
+		count: z.number(),
+	});
+
+	function createMockRes(): {
+		res: import("node:http").ServerResponse;
+		statusCode: number | undefined;
+		headers: Record<string, string>;
+		body: string;
+	} {
+		const state = { statusCode: undefined as number | undefined, headers: {} as Record<string, string>, body: "" };
+		const res = {
+			writeHead(code: number, headers?: Record<string, string>) {
+				state.statusCode = code;
+				if (headers) Object.assign(state.headers, headers);
+				return this;
+			},
+			end(data?: string) {
+				state.body = data ?? "";
+			},
+		} as unknown as import("node:http").ServerResponse;
+		return { res, ...state, get statusCode() { return state.statusCode; }, get headers() { return state.headers; }, get body() { return state.body; } };
+	}
+
+	it("returns parsed data for valid JSON and schema", () => {
+		const mock = createMockRes();
+		const result = parseJsonBody('{"name":"test","count":5}', TestSchema, mock.res);
+		expect(result).toEqual({ name: "test", count: 5 });
+		expect(mock.statusCode).toBeUndefined();
+	});
+
+	it("returns null and sends 400 for invalid JSON", () => {
+		const mock = createMockRes();
+		const result = parseJsonBody("not json", TestSchema, mock.res);
+		expect(result).toBeNull();
+		expect(mock.statusCode).toBe(400);
+		expect(mock.headers["Content-Type"]).toBe("application/json");
+		expect(JSON.parse(mock.body)).toEqual({ error: "Invalid JSON" });
+	});
+
+	it("returns null and sends 400 for schema validation failure", () => {
+		const mock = createMockRes();
+		const result = parseJsonBody('{"name":"","count":"bad"}', TestSchema, mock.res);
+		expect(result).toBeNull();
+		expect(mock.statusCode).toBe(400);
+		expect(mock.headers["Content-Type"]).toBe("application/json");
+		const parsed = JSON.parse(mock.body);
+		expect(parsed.error).toBeDefined();
+		expect(typeof parsed.error).toBe("string");
+	});
+
+	it("returns null and sends 400 for empty string body", () => {
+		const mock = createMockRes();
+		const result = parseJsonBody("", TestSchema, mock.res);
+		expect(result).toBeNull();
+		expect(mock.statusCode).toBe(400);
+		expect(JSON.parse(mock.body)).toEqual({ error: "Invalid JSON" });
 	});
 });
