@@ -64,30 +64,36 @@ export function loadProjectConfig(projectPath: string): ProjectConfig {
     );
   }
 
-  const config = ProjectConfigSchema.parse(raw);
+  const parsed = ProjectConfigSchema.parse(raw);
 
-  // Validate any secrets present in config.yaml
+  // Validate any secrets present in config.yaml; collect invalid field names
+  const invalidSecretFields = new Set<string>();
   for (const field of Object.keys(SECRET_FIELDS)) {
     const key = field as keyof ResolvedSecrets;
-    const value = config[key];
+    const value = parsed[key];
     if (typeof value === "string" && value.length > 0) {
       if (!validateSecretValue(key, value)) {
         logger.warn(`Rejecting invalid ${key} from config.yaml`);
-        delete (config as Record<string, unknown>)[key];
+        invalidSecretFields.add(key);
       }
     }
   }
 
-  // Merge env-based secrets: config values take precedence (backwards compat)
+  // Build a cleaned raw copy without invalid secret fields (no mutation of parsed object)
+  const cleanedRaw = Object.fromEntries(
+    Object.entries(raw).filter(([k]) => !invalidSecretFields.has(k)),
+  );
+
+  // Merge env-based secrets into cleaned raw: config values take precedence (backwards compat)
   const secrets = loadSecrets(projectPath);
   for (const field of Object.keys(SECRET_FIELDS)) {
     const key = field as keyof ResolvedSecrets;
-    if (config[key] === undefined && secrets[key] !== undefined) {
-      Object.assign(config, { [key]: secrets[key] });
+    if (cleanedRaw[key] === undefined && secrets[key] !== undefined) {
+      cleanedRaw[key] = secrets[key];
     }
   }
 
-  return config;
+  return ProjectConfigSchema.parse(cleanedRaw);
 }
 
 export function saveProjectConfig(
