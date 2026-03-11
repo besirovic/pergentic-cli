@@ -1,9 +1,35 @@
 import { spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { logger } from "../utils/logger";
 import { redactString } from "../utils/redact";
 import { buildSafeEnv, capBuffer, MAX_OUTPUT, SIGKILL_DELAY_MS, TRUNCATION_PREFIX } from "../utils/process";
 import type { AgentCommand } from "../agents/types";
 import type { SpawnResult } from "../utils/process";
+
+// Shared registry of active child processes. A single process 'exit' listener
+// is registered when the first child is added and removed when the set empties,
+// preventing unbounded listener accumulation under concurrent load.
+const activeChildren = new Set<ChildProcess>();
+
+function killAllActiveChildren() {
+  for (const child of activeChildren) {
+    try { child.kill("SIGKILL"); } catch { /* already dead */ }
+  }
+}
+
+function registerChild(child: ChildProcess): void {
+  if (activeChildren.size === 0) {
+    process.on("exit", killAllActiveChildren);
+  }
+  activeChildren.add(child);
+}
+
+function unregisterChild(child: ChildProcess): void {
+  activeChildren.delete(child);
+  if (activeChildren.size === 0) {
+    process.off("exit", killAllActiveChildren);
+  }
+}
 
 export interface VerificationResult {
   success: boolean;
@@ -43,14 +69,12 @@ export function execCommand(
     let termTimer: ReturnType<typeof setTimeout> | undefined;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
 
-    // Kill child if the parent process exits normally so it isn't orphaned.
-    const killChild = () => { try { child.kill("SIGKILL"); } catch { /* already dead */ } };
-    process.on("exit", killChild);
+    registerChild(child);
 
     function cleanup() {
       if (termTimer) clearTimeout(termTimer);
       if (killTimer) clearTimeout(killTimer);
-      process.off("exit", killChild);
+      unregisterChild(child);
     }
 
     if (timeoutMs) {
@@ -156,8 +180,6 @@ export function buildVerificationFixPrompt(
   ].join("\n");
 }
 
-import type { ChildProcess } from "node:child_process";
-
 export interface AgentHandle {
   process: ChildProcess;
   result: Promise<SpawnResult>;
@@ -202,14 +224,12 @@ export function spawnAgentAndWait(
   let termTimer: ReturnType<typeof setTimeout> | undefined;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
 
-  // Kill child if the parent process exits normally so it isn't orphaned.
-  const killChild = () => { try { child.kill("SIGKILL"); } catch { /* already dead */ } };
-  process.on("exit", killChild);
+  registerChild(child);
 
   function cleanup() {
     if (termTimer) clearTimeout(termTimer);
     if (killTimer) clearTimeout(killTimer);
-    process.off("exit", killChild);
+    unregisterChild(child);
   }
 
   if (timeoutMs) {
