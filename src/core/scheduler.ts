@@ -87,96 +87,81 @@ export class Scheduler {
 	): Promise<void> {
 		const timestamp = now.toISOString();
 		const taskId = `schedule-${schedule.id}-${Date.now()}`;
+		let dispatched = false;
 
-		if (schedule.type === "prompt") {
-			if (!schedule.prompt) {
-				logger.warn({ scheduleId: schedule.id }, "Schedule has no prompt path configured");
-				this.active.delete(schedule.id);
-				return;
-			}
+		try {
+			let task: Task | undefined;
 
-			const content = readPromptFile(projectPath, schedule.prompt);
-			if (!content || content.trim() === "" || content.trim() === PROMPT_TEMPLATE(schedule.name).trim()) {
-				logger.warn({ scheduleId: schedule.id, promptPath: schedule.prompt }, "Prompt file is empty or still contains template placeholder");
-				this.active.delete(schedule.id);
-				return;
-			}
-
-			const task: Task = {
-				id: taskId,
-				project: projectName,
-				priority: TaskPriority.SCHEDULED,
-				type: "scheduled",
-				createdAt: Date.now(),
-				payload: {
-					taskId,
-					title: schedule.name,
-					description: content,
-					source: "schedule",
-					scheduleId: schedule.id,
-					schedulePrBehavior: schedule.prBehavior,
-					schedulePrBranch: schedule.prBranch,
-					scheduleTimeout: schedule.scheduleTimeout,
-					branch: schedule.branch,
-					targetAgents: schedule.agent ? [schedule.agent] : undefined,
-				},
-			};
-
-			if (this.queue.add(task)) {
-				try {
-					updateLastRun(projectPath, schedule.id, timestamp);
-				} catch (err) {
-					logger.error({ scheduleId: schedule.id, err }, "Failed to persist lastRun, removing task to prevent stale dispatch");
-					this.queue.remove(taskId);
-					this.active.delete(schedule.id);
+			if (schedule.type === "prompt") {
+				if (!schedule.prompt) {
+					logger.warn({ scheduleId: schedule.id }, "Schedule has no prompt path configured");
 					return;
 				}
-				this.lastDispatched.set(schedule.id, now.getTime());
-				this.pruneLastDispatched();
-				logger.info({ scheduleId: schedule.id, taskId, project: projectName }, "Queued scheduled prompt task");
-			} else {
-				this.active.delete(schedule.id);
-			}
-		} else if (schedule.type === "command") {
-			if (!schedule.command) {
-				logger.warn({ scheduleId: schedule.id }, "Schedule has no command configured");
-				this.active.delete(schedule.id);
-				return;
-			}
 
-			const task: Task = {
-				id: taskId,
-				project: projectName,
-				priority: TaskPriority.SCHEDULED,
-				type: "scheduled",
-				createdAt: Date.now(),
-				payload: {
-					taskId,
-					title: schedule.name,
-					description: `Scheduled command: ${schedule.command}`,
-					source: "schedule",
-					scheduleId: schedule.id,
-					scheduledCommand: schedule.command,
-					schedulePrBehavior: schedule.prBehavior,
-					schedulePrBranch: schedule.prBranch,
-					scheduleTimeout: schedule.scheduleTimeout,
-					branch: schedule.branch,
-				},
-			};
-
-			if (this.queue.add(task)) {
-				try {
-					updateLastRun(projectPath, schedule.id, timestamp);
-				} catch (err) {
-					logger.error({ scheduleId: schedule.id, err }, "Failed to persist lastRun, removing task to prevent stale dispatch");
-					this.queue.remove(taskId);
-					this.active.delete(schedule.id);
+				const content = readPromptFile(projectPath, schedule.prompt);
+				if (!content || content.trim() === "" || content.trim() === PROMPT_TEMPLATE(schedule.name).trim()) {
+					logger.warn({ scheduleId: schedule.id, promptPath: schedule.prompt }, "Prompt file is empty or still contains template placeholder");
 					return;
 				}
+
+				task = {
+					id: taskId,
+					project: projectName,
+					priority: TaskPriority.SCHEDULED,
+					type: "scheduled",
+					createdAt: Date.now(),
+					payload: {
+						taskId,
+						title: schedule.name,
+						description: content,
+						source: "schedule",
+						scheduleId: schedule.id,
+						schedulePrBehavior: schedule.prBehavior,
+						schedulePrBranch: schedule.prBranch,
+						scheduleTimeout: schedule.scheduleTimeout,
+						branch: schedule.branch,
+						targetAgents: schedule.agent ? [schedule.agent] : undefined,
+					},
+				};
+			} else if (schedule.type === "command") {
+				if (!schedule.command) {
+					logger.warn({ scheduleId: schedule.id }, "Schedule has no command configured");
+					return;
+				}
+
+				task = {
+					id: taskId,
+					project: projectName,
+					priority: TaskPriority.SCHEDULED,
+					type: "scheduled",
+					createdAt: Date.now(),
+					payload: {
+						taskId,
+						title: schedule.name,
+						description: `Scheduled command: ${schedule.command}`,
+						source: "schedule",
+						scheduleId: schedule.id,
+						scheduledCommand: schedule.command,
+						schedulePrBehavior: schedule.prBehavior,
+						schedulePrBranch: schedule.prBranch,
+						scheduleTimeout: schedule.scheduleTimeout,
+						branch: schedule.branch,
+					},
+				};
+			}
+
+			if (task && this.queue.add(task)) {
+				updateLastRun(projectPath, schedule.id, timestamp);
+				dispatched = true;
 				this.lastDispatched.set(schedule.id, now.getTime());
 				this.pruneLastDispatched();
-				logger.info({ scheduleId: schedule.id, taskId, project: projectName }, "Queued scheduled command task");
-			} else {
+				logger.info({ scheduleId: schedule.id, taskId, project: projectName }, "Queued scheduled task");
+			}
+		} catch (err) {
+			logger.error({ scheduleId: schedule.id, err }, "Failed to dispatch schedule, will retry next cycle");
+			this.queue.remove(taskId);
+		} finally {
+			if (!dispatched) {
 				this.active.delete(schedule.id);
 			}
 		}
