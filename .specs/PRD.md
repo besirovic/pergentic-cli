@@ -220,7 +220,7 @@ claude:
   systemContext: |
     This is a Next.js 15 app with Supabase backend.
     Always use server components unless interactivity is needed.
-    Run `pnpm lint` before finishing.
+    Run `yarn lint` before finishing.
 
 # PR creation
 pr:
@@ -710,7 +710,7 @@ async function updateState() {
 				failed: stats.failedToday,
 				estimatedCost: stats.costToday,
 			},
-		})
+		}),
 	);
 }
 ```
@@ -798,7 +798,7 @@ async function notify(event: TaskEvent) {
    Duration: 3m 22s
 
 ❌ SAAS-143: Fix mobile nav
-   Failed: pnpm build exited with code 1
+   Failed: yarn build exited with code 1
    Run `pergentic retry SAAS-143` to retry
 ```
 
@@ -881,8 +881,8 @@ Built with Ink (React for the terminal). Reads from `~/.pergentic/state.json` on
 │  │ Reading src/lib/stripe.ts...                              │   │
 │  │ Creating src/app/api/webhooks/stripe/route.ts...          │   │
 │  │ Editing src/app/settings/billing/page.tsx...              │   │
-│  │ Running pnpm lint... ✓                                    │   │
-│  │ Running pnpm build... ✓                                   │   │
+│  │ Running yarn lint... ✓                                    │   │
+│  │ Running yarn build... ✓                                   │   │
 │  │ █                                                         │   │
 │  └──────────────────────────────────────────────────────────┘   │
 │                                                                  │
@@ -1156,7 +1156,7 @@ pergentic/
 ```
 
 ```bash
-npm install -g pergentic
+yarn install -g pergentic
 ```
 
 ---
@@ -1165,7 +1165,7 @@ npm install -g pergentic
 
 ```bash
 # Install
-npm install -g pergentic
+yarn install -g pergentic
 
 # Setup
 pergentic init
@@ -1814,7 +1814,7 @@ describe("Task Pipeline Integration", () => {
 	// Uses real git, real filesystem, msw for API
 
 	it(
-		"full pipeline: task queued → worktree created → agent spawned → commit → push → PR"
+		"full pipeline: task queued → worktree created → agent spawned → commit → push → PR",
 	);
 	it("agent receives correct prompt with task description");
 	it("agent runs in correct worktree directory");
@@ -2134,9 +2134,9 @@ describe("E2E Workflow: Linear Task → PR", () => {
 		await waitFor(
 			() =>
 				getState().recentTasks.some(
-					(t) => t.id === "SAAS-142" && t.status === "completed"
+					(t) => t.id === "SAAS-142" && t.status === "completed",
 				),
-			{ timeout: 30_000 }
+			{ timeout: 30_000 },
 		);
 
 		// 4. Verify git state
@@ -2279,7 +2279,7 @@ interface TestRepoOptions {
 }
 
 export async function createTestRepo(
-	options?: TestRepoOptions
+	options?: TestRepoOptions,
 ): Promise<TestRepo> {
 	const dir = await mkdtemp("/tmp/pergentic-test-repo-");
 	const git = simpleGit(dir);
@@ -2353,7 +2353,7 @@ export const githubHandlers = {
 			"https://api.github.com/repos/:owner/:repo/issues/:number/comments",
 			() => {
 				return HttpResponse.json(comments);
-			}
+			},
 		),
 };
 ```
@@ -2371,7 +2371,7 @@ interface CliResult {
 
 export async function runCli(
 	command: string,
-	args?: string[] | { inputs?: string[] }
+	args?: string[] | { inputs?: string[] },
 ): Promise<CliResult> {
 	const cliPath = resolve(__dirname, "../../dist/bin/pergentic.js");
 	const argString = Array.isArray(args) ? args.join(" ") : "";
@@ -2387,7 +2387,7 @@ export async function runCli(
 				},
 				input: Array.isArray(args) ? undefined : args?.inputs?.join("\n"),
 				timeout: 30_000,
-			}
+			},
 		);
 		return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
 	} catch (error: any) {
@@ -2428,7 +2428,7 @@ export function getState(): DaemonState {
 
 export async function waitFor(
 	condition: () => boolean | Promise<boolean>,
-	options: { timeout: number; interval?: number } = { timeout: 10_000 }
+	options: { timeout: number; interval?: number } = { timeout: 10_000 },
 ) {
 	const start = Date.now();
 	while (Date.now() - start < options.timeout) {
@@ -2560,8 +2560,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: pnpm install
-      - run: pnpm test:unit
+      - run: yarn install
+      - run: yarn test:unit
 
   integration:
     runs-on: ubuntu-latest
@@ -2570,8 +2570,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: pnpm install
-      - run: pnpm test:integration
+      - run: yarn install
+      - run: yarn test:integration
 
   e2e:
     runs-on: ubuntu-latest
@@ -2581,10 +2581,10 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: sudo apt-get install -y gh # GitHub CLI for PR tests
-      - run: pnpm install
-      - run: pnpm build # E2E runs compiled binary
+      - run: yarn install
+      - run: yarn build # E2E runs compiled binary
       - run: chmod +x tests/fixtures/agents/mock-agent.sh
-      - run: pnpm test:e2e
+      - run: yarn test:e2e
 
   coverage:
     runs-on: ubuntu-latest
@@ -2593,8 +2593,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: pnpm install
-      - run: pnpm test:coverage
+      - run: yarn install
+      - run: yarn test:coverage
       - uses: codecov/codecov-action@v4
 ```
 
@@ -2629,7 +2629,7 @@ Overall minimum       80%       Enforced in CI
 
 2. **Each test owns its state.** Every test creates its own temp directory, config files, and git repos. No shared mutable state between tests. `afterEach` cleans everything up.
 
-3. **E2E tests use the compiled binary.** Run `pnpm build` before E2E. Tests invoke `node dist/bin/pergentic.js`, not source files. This catches build issues.
+3. **E2E tests use the compiled binary.** Run `yarn build` before E2E. Tests invoke `node dist/bin/pergentic.js`, not source files. This catches build issues.
 
 4. **Integration tests use real git.** Don't mock `simple-git`. Create real repos, make real commits, verify real branch state. Git is core to the product — mock it and you test nothing.
 

@@ -13,20 +13,29 @@ describe("redactArgs", () => {
 	});
 
 	it("redacts GitHub personal access tokens (ghp_*)", () => {
-		const args = ["sk-ant-api03-xyz", "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789"];
+		const args = [
+			"sk-ant-api03-xyz",
+			"ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789",
+		];
 		expect(redactArgs(args)).toEqual(["***REDACTED***", "***REDACTED***"]);
 	});
 
 	it("redacts GitHub OAuth tokens (gho_*)", () => {
-		expect(redactArgs(["gho_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789"])).toEqual(["***REDACTED***"]);
+		expect(redactArgs(["gho_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789"])).toEqual([
+			"***REDACTED***",
+		]);
 	});
 
 	it("redacts GitHub fine-grained PATs (github_pat_*)", () => {
-		expect(redactArgs(["github_pat_abcdefghijklmnopqrstuvw"])).toEqual(["***REDACTED***"]);
+		expect(redactArgs(["github_pat_abcdefghijklmnopqrstuvw"])).toEqual([
+			"***REDACTED***",
+		]);
 	});
 
 	it("redacts Linear API keys (lin_api_*)", () => {
-		expect(redactArgs(["lin_api_abcdefghijklmnopqrstuvwxyz01234"])).toEqual(["***REDACTED***"]);
+		expect(redactArgs(["lin_api_abcdefghijklmnopqrstuvwxyz01234"])).toEqual([
+			"***REDACTED***",
+		]);
 	});
 
 	it("redacts Slack bot tokens (xoxb-*)", () => {
@@ -38,7 +47,9 @@ describe("redactArgs", () => {
 	});
 
 	it("redacts OpenRouter API keys (sk-or-v1-*)", () => {
-		expect(redactArgs(["sk-or-v1-" + "a".repeat(40)])).toEqual(["***REDACTED***"]);
+		expect(redactArgs(["sk-or-v1-" + "a".repeat(40)])).toEqual([
+			"***REDACTED***",
+		]);
 	});
 
 	it("preserves non-sensitive args", () => {
@@ -55,9 +66,21 @@ describe("redactArgs", () => {
 	});
 
 	it("handles mixed sensitive and non-sensitive args", () => {
-		const args = ["claude", "--api-key", "sk-ant-api03-secret123", "--cwd", "/tmp/work"];
+		const args = [
+			"claude",
+			"--api-key",
+			"sk-ant-api03-secret123",
+			"--cwd",
+			"/tmp/work",
+		];
 		const result = redactArgs(args);
-		expect(result).toEqual(["claude", "--api-key", "***REDACTED***", "--cwd", "/tmp/work"]);
+		expect(result).toEqual([
+			"claude",
+			"--api-key",
+			"***REDACTED***",
+			"--cwd",
+			"/tmp/work",
+		]);
 	});
 });
 
@@ -69,19 +92,19 @@ describe("redactString", () => {
 	});
 
 	it("redacts --flag=TOKEN patterns", () => {
-		expect(redactString("deploy --token=ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789")).toBe(
-			"deploy --token=***REDACTED***",
-		);
+		expect(
+			redactString("deploy --token=ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789"),
+		).toBe("deploy --token=***REDACTED***");
 	});
 
 	it("preserves non-sensitive strings", () => {
-		expect(redactString("npm test --bail")).toBe("npm test --bail");
+		expect(redactString("yarn test --bail")).toBe("yarn test --bail");
 	});
 
 	it("redacts multiple tokens in one string", () => {
-		expect(
-			redactString("cmd sk-ant-api03-abc123 --key=xoxb-123-456-abc"),
-		).toBe("cmd ***REDACTED*** --key=***REDACTED***");
+		expect(redactString("cmd sk-ant-api03-abc123 --key=xoxb-123-456-abc")).toBe(
+			"cmd ***REDACTED*** --key=***REDACTED***",
+		);
 	});
 
 	it("handles empty string", () => {

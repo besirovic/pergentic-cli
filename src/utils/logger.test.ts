@@ -109,10 +109,7 @@ describe("logger secret redaction", () => {
 
 	it("serializer redacts cmd field containing a token", () => {
 		const { logger, lines } = createTestLogger();
-		logger.info(
-			{ cmd: "run --token=sk-ant-api03-abc123def456" },
-			"test",
-		);
+		logger.info({ cmd: "run --token=sk-ant-api03-abc123def456" }, "test");
 		const parsed = JSON.parse(lines[0]);
 		expect(parsed.cmd).toBe("run --token=***REDACTED***");
 		expect(parsed.cmd).not.toContain("sk-ant-");
@@ -130,9 +127,9 @@ describe("logger secret redaction", () => {
 
 	it("serializer preserves non-sensitive cmd", () => {
 		const { logger, lines } = createTestLogger();
-		logger.info({ cmd: "npm test --bail" }, "test");
+		logger.info({ cmd: "yarn test --bail" }, "test");
 		const parsed = JSON.parse(lines[0]);
-		expect(parsed.cmd).toBe("npm test --bail");
+		expect(parsed.cmd).toBe("yarn test --bail");
 	});
 
 	it("preserves non-secret fields", () => {
