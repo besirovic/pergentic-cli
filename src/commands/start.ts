@@ -29,6 +29,7 @@ export function forkDaemon(): { pid: number; logFile: string } | null {
 		});
 
 		child.unref();
+		if (child.connected) child.disconnect();
 
 		if (child.pid) {
 			writePid(child.pid);
@@ -56,6 +57,4 @@ export async function start(): Promise<void> {
 		console.log(`   Logs: ${result.logFile}`);
 		console.log(`   Stop: pergentic stop`);
 	}
-
-	process.exit(0);
 }

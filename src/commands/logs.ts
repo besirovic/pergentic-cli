@@ -88,10 +88,12 @@ export async function logs(opts: {
       console.log(parseLogLine(line));
     });
 
-    process.once("SIGINT", () => {
-      rl.close();
-      tail.kill();
-      process.exit(0);
+    await new Promise<void>((resolve) => {
+      process.once("SIGINT", () => {
+        rl.close();
+        tail.kill();
+        resolve();
+      });
     });
   }
 }
