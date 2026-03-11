@@ -162,41 +162,29 @@ export function spawnAgentAndWait(
   });
 
   const MAX_OUTPUT = 8192;
-  const stdoutChunks: Buffer[] = [];
-  const stderrChunks: Buffer[] = [];
-  let stdoutLen = 0;
-  let stderrLen = 0;
+  let stdoutBuf = Buffer.alloc(0);
+  let stderrBuf = Buffer.alloc(0);
   let stdoutTruncated = false;
   let stderrTruncated = false;
   let timedOut = false;
 
   child.stdout?.on("data", (chunk: Buffer) => {
-    stdoutChunks.push(chunk);
-    stdoutLen += chunk.length;
-    while (stdoutLen > MAX_OUTPUT && stdoutChunks.length > 1) {
-      stdoutLen -= stdoutChunks.shift()!.length;
+    const combined = Buffer.concat([stdoutBuf, chunk]);
+    if (combined.length > MAX_OUTPUT) {
+      stdoutBuf = combined.subarray(combined.length - MAX_OUTPUT);
       stdoutTruncated = true;
-    }
-    if (stdoutChunks.length === 1 && stdoutLen > MAX_OUTPUT) {
-      const single = stdoutChunks[0];
-      stdoutChunks[0] = single.subarray(single.length - MAX_OUTPUT);
-      stdoutLen = MAX_OUTPUT;
-      stdoutTruncated = true;
+    } else {
+      stdoutBuf = combined;
     }
   });
 
   child.stderr?.on("data", (chunk: Buffer) => {
-    stderrChunks.push(chunk);
-    stderrLen += chunk.length;
-    while (stderrLen > MAX_OUTPUT && stderrChunks.length > 1) {
-      stderrLen -= stderrChunks.shift()!.length;
+    const combined = Buffer.concat([stderrBuf, chunk]);
+    if (combined.length > MAX_OUTPUT) {
+      stderrBuf = combined.subarray(combined.length - MAX_OUTPUT);
       stderrTruncated = true;
-    }
-    if (stderrChunks.length === 1 && stderrLen > MAX_OUTPUT) {
-      const single = stderrChunks[0];
-      stderrChunks[0] = single.subarray(single.length - MAX_OUTPUT);
-      stderrLen = MAX_OUTPUT;
-      stderrTruncated = true;
+    } else {
+      stderrBuf = combined;
     }
   });
 
@@ -218,8 +206,8 @@ export function spawnAgentAndWait(
     child.on("close", (code) => {
       if (termTimer) clearTimeout(termTimer);
       if (killTimer) clearTimeout(killTimer);
-      const stdout = Buffer.concat(stdoutChunks).toString("utf-8").trim();
-      const stderr = Buffer.concat(stderrChunks).toString("utf-8").trim();
+      const stdout = stdoutBuf.toString("utf-8").trim();
+      const stderr = stderrBuf.toString("utf-8").trim();
       if (timedOut) {
         resolve({
           exitCode: 1,
