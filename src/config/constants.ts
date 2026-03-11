@@ -12,6 +12,12 @@ export const TIMEOUTS = {
   PID_CLEANUP_MS: 500,
 } as const;
 
+/** File permission modes. */
+export const FILE_MODES = {
+  /** Owner read/write only — for PID, lock, state, and other sensitive files. */
+  SECURE: 0o600,
+} as const;
+
 /** Thresholds and sizing limits. */
 export const LIMITS = {
   COMMENT_POLL_WINDOW_MS: 120_000,

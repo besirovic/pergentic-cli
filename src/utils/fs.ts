@@ -1,13 +1,14 @@
 import { readFileSync, existsSync, openSync, writeSync, fsyncSync, closeSync, renameSync } from "node:fs";
 import { readFile, rename, open } from "node:fs/promises";
 import type { z } from "zod";
+import { FILE_MODES } from "../config/constants";
 import { logger } from "./logger";
 
 let writeCounter = 0;
 
-export function atomicWriteFile(filePath: string, data: string): void {
+export function atomicWriteFile(filePath: string, data: string, mode = FILE_MODES.SECURE): void {
   const tmpPath = `${filePath}.${process.pid}.${writeCounter++}.tmp`;
-  const fd = openSync(tmpPath, "w");
+  const fd = openSync(tmpPath, "w", mode);
   try {
     writeSync(fd, data, 0, "utf-8");
     fsyncSync(fd);
@@ -17,9 +18,9 @@ export function atomicWriteFile(filePath: string, data: string): void {
   renameSync(tmpPath, filePath);
 }
 
-export async function atomicWriteFileAsync(filePath: string, data: string): Promise<void> {
+export async function atomicWriteFileAsync(filePath: string, data: string, mode = FILE_MODES.SECURE): Promise<void> {
   const tmpPath = `${filePath}.${process.pid}.${writeCounter++}.tmp`;
-  const fh = await open(tmpPath, "w");
+  const fh = await open(tmpPath, "w", mode);
   try {
     await fh.write(data, 0, "utf-8");
     await fh.sync();

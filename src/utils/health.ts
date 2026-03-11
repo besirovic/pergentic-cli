@@ -1,9 +1,10 @@
 import { readFileSync, writeFileSync, openSync, closeSync, unlinkSync, existsSync } from "node:fs";
 import { daemonPidPath, daemonLockPath } from "../config/paths";
+import { FILE_MODES } from "../config/constants";
 import { logger } from "./logger";
 
 export function writePid(pid: number): void {
-  writeFileSync(daemonPidPath(), String(pid), "utf-8");
+  writeFileSync(daemonPidPath(), String(pid), { encoding: "utf-8", mode: FILE_MODES.SECURE });
 }
 
 export function readPid(): number | null {
@@ -46,7 +47,7 @@ export function acquireLock(): boolean {
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      const fd = openSync(lockFile, "wx");
+      const fd = openSync(lockFile, "wx", FILE_MODES.SECURE);
       try {
         writeFileSync(fd, String(process.pid), "utf-8");
       } finally {
