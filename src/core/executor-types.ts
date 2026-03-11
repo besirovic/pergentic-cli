@@ -27,6 +27,8 @@ export interface ExecutorResult {
   prNumber?: number;
   error?: string;
   retriesAttempted?: number;
+  /** When true, the executor already handled lifecycle recording (e.g. ScheduledCommandRunner). */
+  lifecycleHandled?: boolean;
 }
 
 export interface TaskExecutor {
