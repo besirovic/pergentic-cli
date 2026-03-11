@@ -55,7 +55,7 @@ export async function addFeedbackRound(
 ): Promise<FeedbackHistory> {
   let history = await loadHistory(worktreePath);
   if (!history) {
-    throw new Error("No feedback history found in worktree");
+    throw new Error(`No feedback history found in worktree: ${worktreePath}`);
   }
 
   const round: FeedbackRound = {

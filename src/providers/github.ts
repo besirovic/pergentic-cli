@@ -5,6 +5,7 @@ import { parseOwnerRepo } from "../core/git";
 import { logger } from "../utils/logger";
 import { fetchWithRetry } from "../utils/http";
 
+
 const GITHUB_API = "https://api.github.com";
 const COMMENT_POLL_WINDOW_MS = 120_000;
 
@@ -48,7 +49,8 @@ export class GitHubProvider extends BaseProvider {
     let parsed: { owner: string; repo: string };
     try {
       parsed = parseOwnerRepo(project.repo);
-    } catch {
+    } catch (err) {
+      logger.warn({ err, repo: project.repo }, "Failed to parse GitHub owner/repo, skipping");
       return [];
     }
 

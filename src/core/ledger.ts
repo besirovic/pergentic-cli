@@ -35,8 +35,8 @@ export class DispatchLedger {
         try {
           const entry = JSON.parse(trimmed) as LedgerEntry;
           this.dispatched.add(entry.id);
-        } catch {
-          // Skip malformed lines
+        } catch (err) {
+          logger.warn({ err, line: trimmed }, "Skipping malformed ledger entry");
         }
       }
       logger.info(
@@ -93,8 +93,8 @@ export class DispatchLedger {
             retainedIds.add(entry.id);
             retainedCount++;
           }
-        } catch {
-          // Skip malformed lines
+        } catch (err) {
+          logger.warn({ err, line: trimmed }, "Skipping malformed ledger entry during prune");
         }
       }
 

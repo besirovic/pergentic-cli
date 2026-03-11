@@ -2,8 +2,11 @@ import { select, input, checkbox, confirm } from "@inquirer/prompts";
 import chalk from "chalk";
 import { loadGlobalConfig } from "../../config/loader";
 import { promptTheme } from "../../utils/prompt-helpers";
+import { createLogger } from "../../utils/logger";
 import type { ProjectConfig } from "../../config/schema";
 import type { ToolCategory } from "./ui-helpers";
+
+const logger = createLogger("init:integrations");
 
 export async function configureGitHub(config: ProjectConfig): Promise<void> {
 	config.githubToken = await input({
@@ -245,7 +248,8 @@ export const menuCategories: ToolCategory[] = [
 			try {
 				const g = loadGlobalConfig();
 				return !!g.notifications?.slack?.webhook;
-			} catch {
+			} catch (err) {
+				logger.debug({ err }, "Global config not loaded, treating as unconfigured");
 				return false;
 			}
 		},
