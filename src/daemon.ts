@@ -240,6 +240,11 @@ async function main(): Promise<void> {
 	process.on("SIGTERM", shutdown);
 	process.on("SIGINT", shutdown);
 
+	process.on("unhandledRejection", (reason: unknown) => {
+		logger.fatal({ err: reason }, "Unhandled promise rejection — initiating graceful shutdown");
+		shutdown();
+	});
+
 	// Last-resort lock cleanup on unexpected exit
 	process.on("exit", () => {
 		releaseLock();
