@@ -156,15 +156,20 @@ function resolveNotifications(
 	};
 }
 
+export interface NotifyResult {
+	succeeded: number;
+	failed: number;
+}
+
 export async function notify(
 	event: TaskEvent,
 	config: GlobalConfig,
 	projectConfig?: ProjectConfig,
-): Promise<void> {
+): Promise<NotifyResult> {
 	const notifications = resolveNotifications(config, projectConfig);
-	if (!notifications) return;
+	if (!notifications) return { succeeded: 0, failed: 0 };
 
-	const promises: Promise<void>[] = [];
+	const entries: { provider: string; promise: Promise<void> }[] = [];
 
 	if (notifications.slack?.on[event.type]) {
 		const channelId = projectConfig?.slack?.channels?.[event.type];
@@ -172,56 +177,60 @@ export async function notify(
 
 		if (channelId && botToken) {
 			// Route to specific channel via Bot API
-			promises.push(
-				sendSlackBotMessage(channelId, formatNotificationMessage(event, "slack"), botToken)
-					.then(() => {
-						logger.debug({ event: event.type, channel: channelId }, "Slack notification sent to channel");
-					})
-					.catch((err) => {
-						logger.error({ err, channel: channelId }, "Failed to send Slack notification to channel");
-					})
-			);
+			entries.push({
+				provider: "slack-bot",
+				promise: sendSlackBotMessage(channelId, formatNotificationMessage(event, "slack"), botToken),
+			});
 		} else {
 			// Fall back to global webhook
-			promises.push(
-				fetchWithRetry(notifications.slack.webhook, {
+			entries.push({
+				provider: "slack-webhook",
+				promise: fetchWithRetry(notifications.slack.webhook, {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify({ text: formatNotificationMessage(event, "slack") }),
-				})
-					.then(() => {
-						logger.debug({ event: event.type }, "Slack notification sent");
-					})
-					.catch((err) => {
-						logger.error({ err }, "Failed to send Slack notification");
-					})
-			);
+				}).then(() => undefined),
+			});
 		}
 	}
 
 	if (notifications.discord?.on[event.type]) {
-		promises.push(
-			fetchWithRetry(notifications.discord.webhook, {
+		entries.push({
+			provider: "discord",
+			promise: fetchWithRetry(notifications.discord.webhook, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ content: formatNotificationMessage(event, "discord") }),
-			})
-				.then(() => {
-					logger.debug({ event: event.type }, "Discord notification sent");
-				})
-				.catch((err) => {
-					logger.error({ err }, "Failed to send Discord notification");
-				})
-		);
+			}).then(() => undefined),
+		});
 	}
 
 	if (notifications.desktop?.on[event.type]) {
-		promises.push(
-			sendDesktopNotification(event).catch((err) => {
-				logger.error({ err }, "Failed to send desktop notification");
-			})
-		);
+		entries.push({ provider: "desktop", promise: sendDesktopNotification(event) });
 	}
 
-	await Promise.allSettled(promises);
+	if (entries.length === 0) return { succeeded: 0, failed: 0 };
+
+	const results = await Promise.allSettled(entries.map((e) => e.promise));
+
+	let succeeded = 0;
+	let failed = 0;
+	for (let i = 0; i < results.length; i++) {
+		const result = results[i];
+		const provider = entries[i].provider;
+		if (result.status === "fulfilled") {
+			logger.debug({ event: event.type, provider }, "Notification sent");
+			succeeded++;
+		} else {
+			logger.warn({ err: result.reason, provider, event: event.type }, "Notification failed");
+			failed++;
+		}
+	}
+
+	logger.debug(
+		{ succeeded, total: entries.length, event: event.type },
+		`Notifications: ${succeeded}/${entries.length} succeeded`,
+	);
+
+	return { succeeded, failed };
 }
