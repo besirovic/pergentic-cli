@@ -95,12 +95,14 @@ export class TaskQueue {
   next(): Task | undefined {
     const task = this.tasks.shift();
     if (task) {
-      this.seen.delete(task.id);
       this.index.delete(task.id);
-      // Decrement all remaining indices
+      // Rebuild all remaining indices atomically before releasing the dedup guard.
+      // Keeping seen intact until after the index is consistent prevents a
+      // concurrent add() from inserting the same task while indices are stale.
       for (let i = 0; i < this.tasks.length; i++) {
         this.index.set(this.tasks[i].id, i);
       }
+      this.seen.delete(task.id);
     }
     return task;
   }

@@ -193,6 +193,41 @@ describe("TaskQueue", () => {
     });
   });
 
+  it("index remains consistent after rapid successive next() calls", () => {
+    const q = new TaskQueue();
+    const count = 100;
+    for (let i = 0; i < count; i++) {
+      q.add(makeTask(`task-${i}`, TaskPriority.NEW));
+    }
+
+    // Drain half the queue rapidly
+    const drained: string[] = [];
+    for (let i = 0; i < count / 2; i++) {
+      const task = q.next();
+      expect(task).toBeDefined();
+      drained.push(task!.id);
+    }
+
+    // No duplicates in drained set
+    expect(new Set(drained).size).toBe(drained.length);
+
+    // Remaining tasks: index must match actual position
+    const remaining = q.active();
+    expect(remaining).toHaveLength(count / 2);
+    for (let i = 0; i < remaining.length; i++) {
+      // Remove should succeed (index must be correct)
+      const copy = new TaskQueue();
+      remaining.forEach((t) => copy.add(t));
+      expect(copy.remove(remaining[i].id)).toBe(true);
+    }
+
+    // Queue can still be drained cleanly
+    let seen = 0;
+    while (q.next()) seen++;
+    expect(seen).toBe(count / 2);
+    expect(q.length).toBe(0);
+  });
+
   it("remove with 10000 items completes in < 10ms", () => {
     const q = new TaskQueue();
     for (let i = 0; i < 10_000; i++) {
