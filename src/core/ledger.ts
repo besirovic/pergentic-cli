@@ -1,5 +1,6 @@
-import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { existsSync, createReadStream, createWriteStream } from "node:fs";
+import { readFile, rename, unlink } from "node:fs/promises";
+import { createInterface } from "node:readline";
 import { dispatchedLedgerPath } from "../config/paths";
 import { ensureGlobalConfigDir } from "../config/loader";
 import { logger } from "../utils/logger";
@@ -72,26 +73,43 @@ export class DispatchLedger {
     if (!existsSync(this.filePath)) return;
 
     const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
-    const content = await readFile(this.filePath, "utf-8");
-    const retained: string[] = [];
+    const tmpPath = `${this.filePath}.${process.pid}.tmp`;
     const retainedIds = new Set<string>();
+    let retainedCount = 0;
 
-    for (const line of content.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        const entry = JSON.parse(trimmed) as LedgerEntry;
-        if (new Date(entry.timestamp).getTime() >= cutoff) {
-          retained.push(trimmed);
-          retainedIds.add(entry.id);
+    try {
+      const readStream = createReadStream(this.filePath, { encoding: "utf-8" });
+      const writeStream = createWriteStream(tmpPath, { encoding: "utf-8" });
+
+      const rl = createInterface({ input: readStream, crlfDelay: Infinity });
+
+      for await (const line of rl) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const entry = JSON.parse(trimmed) as LedgerEntry;
+          if (new Date(entry.timestamp).getTime() >= cutoff) {
+            writeStream.write(trimmed + "\n");
+            retainedIds.add(entry.id);
+            retainedCount++;
+          }
+        } catch {
+          // Skip malformed lines
         }
-      } catch {
-        // Skip malformed lines
       }
-    }
 
-    this.dispatched = retainedIds;
-    await writeFile(this.filePath, retained.join("\n") + (retained.length ? "\n" : ""));
-    logger.info({ retained: retained.length, maxAgeDays }, "Pruned dispatch ledger");
+      await new Promise<void>((resolve, reject) => {
+        writeStream.end(() => resolve());
+        writeStream.on("error", reject);
+      });
+
+      await rename(tmpPath, this.filePath);
+      this.dispatched = retainedIds;
+      logger.info({ retained: retainedCount, maxAgeDays }, "Pruned dispatch ledger");
+    } catch (err) {
+      // Clean up temp file if anything fails, preserving the original
+      try { await unlink(tmpPath); } catch { /* temp file may not exist */ }
+      throw err;
+    }
   }
 }
