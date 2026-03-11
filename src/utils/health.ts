@@ -61,16 +61,26 @@ export function acquireLock(): boolean {
         return false;
       }
       // Lock file exists — check if the holding process is still alive
+      let originalPid = NaN;
       try {
-        const lockPid = parseInt(readFileSync(lockFile, "utf-8").trim(), 10);
-        if (!Number.isNaN(lockPid)) {
-          process.kill(lockPid, 0); // throws if process doesn't exist
+        originalPid = parseInt(readFileSync(lockFile, "utf-8").trim(), 10);
+        if (!Number.isNaN(originalPid)) {
+          process.kill(originalPid, 0); // throws if process doesn't exist
           return false; // process is alive, lock is valid
         }
       } catch {
         // Process is dead or PID unreadable — stale lock
       }
+      // Guard against TOCTOU race: between the liveness check above and
+      // the unlink below, the stale lock could be cleaned up by another
+      // instance which then creates a new valid lock with a different PID.
+      // Re-read to verify the PID hasn't changed before removing.
       try {
+        const currentPid = parseInt(readFileSync(lockFile, "utf-8").trim(), 10);
+        if (!Number.isNaN(currentPid) && currentPid !== originalPid) {
+          // PID changed — another process acquired a new lock; don't steal it
+          return false;
+        }
         unlinkSync(lockFile);
       } catch {
         // Another process may have already removed it; retry will handle it
