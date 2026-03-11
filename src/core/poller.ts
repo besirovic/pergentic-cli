@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import type { ProjectContext, TaskProvider } from "../providers/types";
+import type { ProjectContext, TaskProvider, IncomingTask } from "../providers/types";
 import { LinearProvider } from "../providers/linear";
 import { GitHubProvider } from "../providers/github";
 import { TaskQueue, TaskPriority, type Task } from "./queue";
@@ -11,9 +11,33 @@ import { loadProjectsRegistry } from "../config/loader";
 import { getCachedProjectConfig } from "../config/cache";
 import type { ProjectConfig } from "../config/schema";
 import { logger } from "../utils/logger";
+import { LinearMetadataSchema, GitHubMetadataSchema } from "./comments";
 
 export interface PollerConfig {
   pollInterval: number; // seconds
+}
+
+function validateIncomingMetadata(incoming: IncomingTask): boolean {
+  if (incoming.source === "linear") {
+    const result = LinearMetadataSchema.safeParse(incoming.metadata);
+    if (!result.success) {
+      logger.error(
+        { taskId: incoming.id, source: incoming.source, issues: result.error.issues },
+        "Task has invalid metadata, skipping ingestion",
+      );
+      return false;
+    }
+  } else if (incoming.source === "github") {
+    const result = GitHubMetadataSchema.safeParse(incoming.metadata);
+    if (!result.success) {
+      logger.error(
+        { taskId: incoming.id, source: incoming.source, issues: result.error.issues },
+        "Task has invalid metadata, skipping ingestion",
+      );
+      return false;
+    }
+  }
+  return true;
 }
 
 interface CachedProviders {
@@ -125,6 +149,8 @@ export class Poller {
         try {
           const tasks = await provider.poll(context);
           for (const incoming of tasks) {
+            if (!validateIncomingMetadata(incoming)) continue;
+
             // Feedback tasks skip label resolution — they use the original agent
             if (incoming.type === "feedback") {
               if (this.ledger.isDispatched(incoming.id)) continue;

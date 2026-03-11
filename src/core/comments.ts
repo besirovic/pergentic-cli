@@ -1,9 +1,14 @@
+import { z } from "zod";
 import { getChangeSummary } from "./git";
 import { replyToPRComment } from "./git";
 import { logger } from "../utils/logger";
 import { fetchWithRetry } from "../utils/http";
 import type { ProjectConfig } from "../config/schema";
 import type { Task } from "./queue";
+
+export const LinearMetadataSchema = z.object({ linearId: z.string() });
+export const GitHubMetadataSchema = z.object({ issueNumber: z.number().int().positive() });
+export const JiraMetadataSchema = z.object({ jiraIssueKey: z.string() });
 
 export interface CommentContext {
   worktreePath: string;
@@ -125,29 +130,31 @@ async function dispatchCommentToProviders(
   const promises: Promise<void>[] = [];
 
   // Post on Linear issue if source is linear
-  if (
-    payload.source === "linear" &&
-    payload.metadata?.linearId &&
-    projectConfig.linearApiKey
-  ) {
-    const linearId = payload.metadata.linearId;
-    if (typeof linearId === "string") {
+  if (payload.source === "linear" && projectConfig.linearApiKey) {
+    const parsed = LinearMetadataSchema.safeParse(payload.metadata);
+    if (parsed.success) {
       promises.push(
-        postLinearComment(linearId, body, projectConfig.linearApiKey),
+        postLinearComment(parsed.data.linearId, body, projectConfig.linearApiKey),
+      );
+    } else {
+      logger.warn(
+        { taskId: payload.taskId, issues: parsed.error.issues },
+        "Invalid linear metadata, skipping comment dispatch",
       );
     }
   }
 
   // Post on GitHub issue if source is github
-  if (
-    payload.source === "github" &&
-    payload.metadata?.issueNumber &&
-    projectConfig.githubToken
-  ) {
-    const issueNumber = payload.metadata.issueNumber;
-    if (typeof issueNumber === "number") {
+  if (payload.source === "github" && projectConfig.githubToken) {
+    const parsed = GitHubMetadataSchema.safeParse(payload.metadata);
+    if (parsed.success) {
       promises.push(
-        replyToPRComment(repo, issueNumber, body, projectConfig.githubToken),
+        replyToPRComment(repo, parsed.data.issueNumber, body, projectConfig.githubToken),
+      );
+    } else {
+      logger.warn(
+        { taskId: payload.taskId, issues: parsed.error.issues },
+        "Invalid github metadata, skipping comment dispatch",
       );
     }
   }
@@ -155,21 +162,25 @@ async function dispatchCommentToProviders(
   // Post on Jira ticket if source is jira
   if (
     payload.source === "jira" &&
-    payload.metadata?.jiraIssueKey &&
     projectConfig.jiraDomain &&
     projectConfig.jiraEmail &&
     projectConfig.jiraApiToken
   ) {
-    const jiraIssueKey = payload.metadata.jiraIssueKey;
-    if (typeof jiraIssueKey === "string") {
+    const parsed = JiraMetadataSchema.safeParse(payload.metadata);
+    if (parsed.success) {
       promises.push(
         postJiraComment(
-          jiraIssueKey,
+          parsed.data.jiraIssueKey,
           body,
           projectConfig.jiraDomain,
           projectConfig.jiraEmail,
           projectConfig.jiraApiToken,
         ),
+      );
+    } else {
+      logger.warn(
+        { taskId: payload.taskId, issues: parsed.error.issues },
+        "Invalid jira metadata, skipping comment dispatch",
       );
     }
   }
