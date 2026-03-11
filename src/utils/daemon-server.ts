@@ -7,8 +7,9 @@ const STATUS_RATE_LIMIT = 120; // GET /status: 120 per minute
 const ACTION_RATE_LIMIT = 30; // POST /retry, /cancel: 30 per minute
 const RATE_WINDOW_MS = 60_000; // 1 minute window
 const CLEANUP_INTERVAL_MS = 5 * 60_000; // Clean stale entries every 5 minutes
+const REQUEST_TIMEOUT_MS = 5_000; // Abandon slow-client requests after 5 seconds
 
-type RouteHandler = (body: string, res: ServerResponse) => void;
+type RouteHandler = (body: string, res: ServerResponse, signal: AbortSignal) => void;
 
 interface Route {
   method: string;
@@ -53,11 +54,13 @@ export function parseJsonBody<T>(body: string, schema: ZodType<T>, res: ServerRe
 
 export function createDaemonServer(): {
   server: Server;
-  get: (path: string, handler: (res: ServerResponse) => void) => void;
-  post: (path: string, handler: RouteHandler) => void;
+  get: (path: string, handler: (res: ServerResponse, signal: AbortSignal) => void) => void;
+  post: (path: string, handler: (body: string, res: ServerResponse) => void) => void;
+  abortPending: () => void;
 } {
   const routes: Route[] = [];
   const rateLimitState = new Map<string, RateLimitEntry>();
+  const pendingRequests = new Set<AbortController>();
 
   // Periodically clean up stale rate limit entries
   const cleanupTimer = setInterval(() => {
@@ -69,6 +72,32 @@ export function createDaemonServer(): {
     }
   }, CLEANUP_INTERVAL_MS);
   cleanupTimer.unref();
+
+  function withRequestTimeout(res: ServerResponse, fn: (signal: AbortSignal) => void): void {
+    const ac = new AbortController();
+    pendingRequests.add(ac);
+
+    const timer = setTimeout(() => {
+      ac.abort(new Error("Request timeout"));
+    }, REQUEST_TIMEOUT_MS);
+    timer.unref();
+
+    ac.signal.addEventListener("abort", () => {
+      clearTimeout(timer);
+      pendingRequests.delete(ac);
+      if (!res.writableEnded) {
+        res.destroy();
+      }
+    }, { once: true });
+
+    res.on("close", () => {
+      clearTimeout(timer);
+      pendingRequests.delete(ac);
+      if (!ac.signal.aborted) ac.abort();
+    });
+
+    fn(ac.signal);
+  }
 
   function checkRateLimit(ip: string, method: string, res: ServerResponse): boolean {
     const limit = method === "GET" ? STATUS_RATE_LIMIT : ACTION_RATE_LIMIT;
@@ -105,7 +134,7 @@ export function createDaemonServer(): {
       const route = routes.find((r) => r.method === "GET" && r.path === url);
       if (route) {
         if (!checkRateLimit(clientIp, method, res)) return;
-        route.handler("", res);
+        withRequestTimeout(res, (signal) => route.handler("", res, signal));
         return;
       }
     }
@@ -130,7 +159,7 @@ export function createDaemonServer(): {
           chunks.push(chunk);
         });
         req.on("end", () => {
-          if (!rejected) route.handler(Buffer.concat(chunks).toString("utf-8"), res);
+          if (!rejected) withRequestTimeout(res, (signal) => route.handler(Buffer.concat(chunks).toString("utf-8"), res, signal));
         });
         return;
       }
@@ -141,11 +170,17 @@ export function createDaemonServer(): {
 
   return {
     server,
-    get(path: string, handler: (res: ServerResponse) => void) {
-      routes.push({ method: "GET", path, handler: (_body, res) => handler(res) });
+    abortPending() {
+      for (const ac of pendingRequests) {
+        ac.abort(new Error("Shutdown"));
+      }
+      pendingRequests.clear();
     },
-    post(path: string, handler: RouteHandler) {
-      routes.push({ method: "POST", path, handler });
+    get(path: string, handler: (res: ServerResponse, signal: AbortSignal) => void) {
+      routes.push({ method: "GET", path, handler: (_body, res, signal) => handler(res, signal) });
+    },
+    post(path: string, handler: (body: string, res: ServerResponse) => void) {
+      routes.push({ method: "POST", path, handler: (body, res, _signal) => handler(body, res) });
     },
   };
 }

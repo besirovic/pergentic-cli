@@ -152,16 +152,18 @@ async function main(): Promise<void> {
 	stateInterval.unref();
 
 	// HTTP server with router
-	const { server, get, post } = createDaemonServer();
+	const { server, get, post, abortPending } = createDaemonServer();
 
 	// Handler is intentionally fire-and-forget: the daemon-server API is
 	// synchronous (returns void) so we use .then() to write the response
 	// once the file read completes. Both branches end with res.end().
-	get("/status", (res) => {
+	// The signal is used to abort the readFile and abandon the response on
+	// shutdown or per-request timeout (slow clients).
+	get("/status", (res, signal) => {
 		res.setHeader("Content-Type", "application/json");
 		const statePath = stateFilePath();
 		if (existsSync(statePath)) {
-			readFile(statePath, "utf-8").then(
+			readFile(statePath, { encoding: "utf-8", signal }).then(
 				(data) => {
 					try {
 						if (!res.headersSent) res.end(data);
@@ -170,6 +172,7 @@ async function main(): Promise<void> {
 					}
 				},
 				(err) => {
+					if ((err as NodeJS.ErrnoException)?.code === "ABORT_ERR") return;
 					logger.error({ err }, "Failed to read state file for /status");
 					try {
 						if (!res.headersSent)
@@ -178,7 +181,8 @@ async function main(): Promise<void> {
 						logger.error({ err: e }, "Failed to write /status error response");
 					}
 				},
-			).catch((e) => {
+			).catch((e: unknown) => {
+				if ((e as NodeJS.ErrnoException)?.code === "ABORT_ERR") return;
 				logger.error({ err: e }, "Unhandled error in /status handler");
 			});
 		} else {
@@ -236,6 +240,9 @@ async function main(): Promise<void> {
 			clearInterval(stateInterval);
 
 			await runner.waitForAll(DAEMON.SHUTDOWN_TIMEOUT_MS);
+
+			// Abort any pending HTTP requests before closing the server
+			abortPending();
 
 			// Close HTTP server with a 5-second timeout
 			await Promise.race([

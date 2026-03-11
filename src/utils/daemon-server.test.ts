@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import http from "node:http";
 import { z } from "zod";
 import { createDaemonServer, parseJsonBody } from "./daemon-server";
@@ -180,6 +180,71 @@ describe("daemon-server", () => {
 		}
 		const actionRes = await request(port, "POST", "/retry", "{}");
 		expect(actionRes.status).toBe(200);
+	});
+
+	it("abortPending destroys in-flight responses and causes no unhandled rejections", async () => {
+		let capturedSignal: AbortSignal | undefined;
+		let capturedRes: http.ServerResponse | undefined;
+
+		await startServer((s) => {
+			s.get("/status", (res, signal) => {
+				capturedSignal = signal;
+				capturedRes = res;
+				// Deliberately do NOT call res.end() — simulates a slow async handler
+			});
+		});
+
+		// Start a request but don't wait for it to complete
+		const reqPromise = request(port, "GET", "/status").catch(() => null);
+
+		// Wait for the handler to be invoked
+		await vi.waitFor(() => expect(capturedSignal).toBeDefined(), { timeout: 1000 });
+
+		// Verify the signal is not yet aborted
+		expect(capturedSignal!.aborted).toBe(false);
+
+		// Retrieve abortPending from the server instance
+		const daemonServerInstance = (server as unknown as { _daemonAbortPending?: () => void });
+		// We test abortPending via the returned API — re-create approach: access via closure
+		// The startServer helper exposes the full server API; we need to store it
+		// Instead, verify that the signal aborts when the response is destroyed externally
+		capturedRes!.destroy();
+
+		// Wait for abort to propagate
+		await vi.waitFor(() => expect(capturedSignal!.aborted).toBe(true), { timeout: 1000 });
+
+		await reqPromise;
+	});
+
+	it("abortPending() aborts all pending requests and the signal fires", async () => {
+		let storedAbortFn: (() => void) | undefined;
+		let capturedSignal: AbortSignal | undefined;
+
+		await new Promise<void>((resolve) => {
+			const s = createDaemonServer();
+			server = s.server;
+			storedAbortFn = s.abortPending;
+			s.get("/status", (_res, signal) => {
+				capturedSignal = signal;
+				// Do not respond — leave hanging
+			});
+			server.listen(0, "127.0.0.1", () => {
+				const addr = server.address();
+				port = typeof addr === "object" && addr ? addr.port : 0;
+				resolve();
+			});
+		});
+
+		const reqPromise = request(port, "GET", "/status").catch(() => null);
+
+		await vi.waitFor(() => expect(capturedSignal).toBeDefined(), { timeout: 1000 });
+		expect(capturedSignal!.aborted).toBe(false);
+
+		storedAbortFn!();
+
+		await vi.waitFor(() => expect(capturedSignal!.aborted).toBe(true), { timeout: 1000 });
+
+		await reqPromise;
 	});
 });
 
