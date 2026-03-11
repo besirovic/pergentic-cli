@@ -2,19 +2,24 @@ import { writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir, platform } from "node:os";
 import { success } from "../utils/ui";
+import { escapeXml } from "../utils/format";
+
+function escapeSystemdValue(str: string): string {
+	return str.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
 
 function generateSystemdUnit(): string {
-	const nodePath = process.execPath;
+	const nodePath = escapeSystemdValue(process.execPath);
+	const pergentic = escapeSystemdValue(
+		join(dirname(process.argv[1] ?? ""), "pergentic.js")
+	);
 	return `[Unit]
 Description=Pergentic - Autonomous PR Generator
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=${nodePath} ${join(
-		dirname(process.argv[1] ?? ""),
-		"pergentic.js"
-	)} start --foreground
+ExecStart=${nodePath} ${pergentic} start --foreground
 Restart=on-failure
 RestartSec=10
 Environment=NODE_ENV=production
@@ -25,8 +30,11 @@ WantedBy=default.target
 }
 
 function generateLaunchdPlist(): string {
-	const nodePath = process.execPath;
-	const pergentic = join(dirname(process.argv[1] ?? ""), "pergentic.js");
+	const nodePath = escapeXml(process.execPath);
+	const pergentic = escapeXml(
+		join(dirname(process.argv[1] ?? ""), "pergentic.js")
+	);
+	const logPath = escapeXml(join(homedir(), ".pergentic", "daemon.log"));
 	return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -45,9 +53,9 @@ function generateLaunchdPlist(): string {
   <key>KeepAlive</key>
   <true/>
   <key>StandardOutPath</key>
-  <string>${join(homedir(), ".pergentic", "daemon.log")}</string>
+  <string>${logPath}</string>
   <key>StandardErrorPath</key>
-  <string>${join(homedir(), ".pergentic", "daemon.log")}</string>
+  <string>${logPath}</string>
 </dict>
 </plist>
 `;

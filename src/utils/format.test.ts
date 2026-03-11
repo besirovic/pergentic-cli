@@ -1,5 +1,35 @@
 import { describe, it, expect } from "vitest";
-import { formatDuration } from "./format";
+import { escapeXml, formatDuration } from "./format";
+
+describe("escapeXml", () => {
+	it("escapes all five XML-special characters", () => {
+		expect(escapeXml('a&b<c>d"e\'f')).toBe(
+			"a&amp;b&lt;c&gt;d&quot;e&apos;f"
+		);
+	});
+
+	it("escapes ampersand in path", () => {
+		expect(escapeXml("/usr/local/bin/node&foo")).toBe(
+			"/usr/local/bin/node&amp;foo"
+		);
+	});
+
+	it("escapes angle brackets in path", () => {
+		expect(escapeXml("/path/<dir>/file")).toBe("/path/&lt;dir&gt;/file");
+	});
+
+	it("returns empty string unchanged", () => {
+		expect(escapeXml("")).toBe("");
+	});
+
+	it("returns normal path unchanged", () => {
+		expect(escapeXml("/usr/local/bin/node")).toBe("/usr/local/bin/node");
+	});
+
+	it("handles multiple ampersands", () => {
+		expect(escapeXml("a&b&c")).toBe("a&amp;b&amp;c");
+	});
+});
 
 describe("formatDuration", () => {
 	it("formats seconds only", () => {
