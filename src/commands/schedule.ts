@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { select, input } from "@inquirer/prompts";
 // chalk is used for complex multi-color table/prompt output.
 // Simple status messages (error/warn/success) use ../utils/ui.
@@ -98,28 +98,41 @@ export async function scheduleAdd(projectPath: string): Promise<void> {
 			});
 
 			if (editChoice === "edit") {
-				if (!process.stdin.isTTY) {
-					error("Cannot open editor: stdin is not an interactive terminal");
-					const fullPath = schedulePromptPath(projectPath, relativePath);
-					console.log(chalk.dim(`\n  Edit prompt at: ${fullPath}\n`));
+				const isInteractive = process.stdin.isTTY && process.stdout.isTTY;
+				const fullPath = schedulePromptPath(projectPath, relativePath);
+				if (!isInteractive) {
+					error("Cannot open editor: stdin and stdout must both be interactive terminals");
+					console.log(chalk.dim(`\n  Edit the prompt file directly:\n    ${fullPath}`));
+					console.log(chalk.dim(`  Or run ${chalk.cyan("pergentic schedule add")} in an interactive terminal.\n`));
 				} else {
-					const fullPath = schedulePromptPath(projectPath, relativePath);
 					const editor = resolveEditor();
-					await new Promise<void>((resolve, reject) => {
-						const child = spawn(editor, [fullPath], { stdio: "inherit" });
-						const onSigint = () => {
-							child.kill("SIGTERM");
-						};
-						process.on("SIGINT", onSigint);
-						child.on("close", (code) => {
-							process.removeListener("SIGINT", onSigint);
-							resolve();
+					let editorExists = true;
+					try {
+						execFileSync("which", [editor], { stdio: "ignore" });
+					} catch {
+						editorExists = false;
+					}
+					if (!editorExists) {
+						error(`Editor "${editor}" not found in PATH`);
+						console.log(chalk.dim(`\n  Set the ${chalk.cyan("EDITOR")} environment variable to a valid editor binary.`));
+						console.log(chalk.dim(`  Or edit the prompt file directly:\n    ${fullPath}\n`));
+					} else {
+						await new Promise<void>((resolve, reject) => {
+							const child = spawn(editor, [fullPath], { stdio: "inherit" });
+							const onSigint = () => {
+								child.kill("SIGTERM");
+							};
+							process.on("SIGINT", onSigint);
+							child.on("close", () => {
+								process.removeListener("SIGINT", onSigint);
+								resolve();
+							});
+							child.on("error", (err) => {
+								process.removeListener("SIGINT", onSigint);
+								reject(err);
+							});
 						});
-						child.on("error", (err) => {
-							process.removeListener("SIGINT", onSigint);
-							reject(err);
-						});
-					});
+					}
 				}
 			} else {
 				const fullPath = schedulePromptPath(projectPath, relativePath);
