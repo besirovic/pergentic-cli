@@ -16,7 +16,7 @@ import { extractSecrets, saveProjectEnv, migrateConfigSecrets } from "../../conf
 import { DEFAULT_PROMPT_TEMPLATE } from "../../core/prompt-template-constants";
 import { isExitPromptError, promptTheme } from "../../utils/prompt-helpers";
 import { error } from "../../utils/ui";
-import type { ProjectConfig } from "../../config/schema";
+import { ProjectConfigSchema, type ProjectConfig } from "../../config/schema";
 import { clearScreen, printHeader, formatChoice, agentDisplayName, printSummary } from "./ui-helpers";
 import { menuCategories } from "./integrations";
 import {
@@ -96,6 +96,17 @@ export async function init(projectPath?: string): Promise<void> {
 
 	const hasExisting = existsSync(configFile);
 
+	// Staging draft: collect all wizard changes here; only merge to config on successful completion
+	const draft: ProjectConfig = structuredClone(config);
+
+	// Handle Ctrl+C between prompts (SIGINT outside inquirer) to ensure clean exit without saving
+	const onSigint = () => {
+		clearScreen();
+		console.log(chalk.dim("\n  Exited without saving.\n"));
+		process.exit(0);
+	};
+	process.once("SIGINT", onSigint);
+
 	try {
 		// --- Wizard: Steps 1-3 (linear flow) ---
 		clearScreen();
@@ -109,30 +120,30 @@ export async function init(projectPath?: string): Promise<void> {
 		}
 
 		// Step 1: Select agents
-		const selectedAgents = await wizardStep1SelectAgents(config);
-		config.configuredAgents = selectedAgents;
+		const selectedAgents = await wizardStep1SelectAgents(draft);
+		draft.configuredAgents = selectedAgents;
 
 		// Step 2: Select default agent
-		const defaultAgent = await wizardStep2SelectDefault(selectedAgents, config);
-		config.agent = defaultAgent;
+		const defaultAgent = await wizardStep2SelectDefault(selectedAgents, draft);
+		draft.agent = defaultAgent;
 
 		// Step 3: Configure API keys per agent
-		await wizardStep3ConfigureKeys(selectedAgents, config);
+		await wizardStep3ConfigureKeys(selectedAgents, draft);
 
 		// Step 4: Configure agent tools
-		await wizardStepConfigureTools(selectedAgents, config);
+		await wizardStepConfigureTools(selectedAgents, draft);
 
 		// Step 5: Configure agent labels
-		await wizardStepConfigureLabels(selectedAgents, config);
+		await wizardStepConfigureLabels(selectedAgents, draft);
 
 		// Step 6: Configure model labels
-		await wizardStepConfigureModelLabels(selectedAgents, config);
+		await wizardStepConfigureModelLabels(selectedAgents, draft);
 
 		// Step 7: Configure verification commands
-		await wizardStepConfigureVerification(config);
+		await wizardStepConfigureVerification(draft);
 
 		// Step 8: Configure agent execution retries
-		await wizardStepConfigureAgentRetry(config);
+		await wizardStepConfigureAgentRetry(draft);
 
 		// --- Step 9: Remaining integrations (menu-based) ---
 		let continueMenu = true;
@@ -152,7 +163,7 @@ export async function init(projectPath?: string): Promise<void> {
 
 			const choices = [
 				...menuCategories.map((cat) => ({
-					name: formatChoice(cat, config),
+					name: formatChoice(cat, draft),
 					value: cat.id,
 				})),
 				new Separator(chalk.dim("──────────────────────────────────────")),
@@ -179,7 +190,7 @@ export async function init(projectPath?: string): Promise<void> {
 				console.log();
 				console.log(`  ${chalk.cyan("─")} ${chalk.bold(category.label)}`);
 				console.log();
-				await category.configure(config);
+				await category.configure(draft);
 			} catch (err: unknown) {
 				if (isExitPromptError(err)) {
 					// Ctrl+C during sub-flow returns to menu
@@ -189,6 +200,7 @@ export async function init(projectPath?: string): Promise<void> {
 			}
 		}
 	} catch (err: unknown) {
+		process.removeListener("SIGINT", onSigint);
 		if (isExitPromptError(err)) {
 			clearScreen();
 			console.log(chalk.dim("\n  Exited without saving.\n"));
@@ -197,13 +209,23 @@ export async function init(projectPath?: string): Promise<void> {
 		throw err;
 	}
 
+	process.removeListener("SIGINT", onSigint);
+
+	// Validate complete staged config before any writes
+	const validation = ProjectConfigSchema.safeParse(draft);
+	if (!validation.success) {
+		error(`Config validation failed: ${validation.error.message}`);
+		return;
+	}
+	const validatedConfig = validation.data;
+
 	clearScreen();
 	printHeader();
 
-	printSummary(config, menuCategories);
+	printSummary(validatedConfig, menuCategories);
 
 	// Extract secrets from config and write to .env file
-	const { secrets, cleaned } = extractSecrets(config);
+	const { secrets, cleaned } = extractSecrets(validatedConfig);
 	if (Object.keys(secrets).length > 0) {
 		saveProjectEnv(absPath, secrets);
 		console.log(`  ${chalk.green("✓")} Secrets saved to ${chalk.dim(".pergentic/.env")}`);
@@ -213,7 +235,7 @@ export async function init(projectPath?: string): Promise<void> {
 	saveProjectConfig(absPath, cleaned);
 
 	// Create default prompt template if it doesn't exist
-	const templateFilename = config.promptTemplate?.path ?? "PROMPT.md";
+	const templateFilename = validatedConfig.promptTemplate?.path ?? "PROMPT.md";
 	const templateFile = promptTemplatePath(absPath, templateFilename);
 	if (!existsSync(templateFile)) {
 		writeFileSync(templateFile, DEFAULT_PROMPT_TEMPLATE);
@@ -231,11 +253,11 @@ export async function init(projectPath?: string): Promise<void> {
 	}
 
 	// Clone repo into workspaces dir for worktree-based task execution
-	if (config.repo) {
+	if (validatedConfig.repo) {
 		const projectName = basename(absPath) || "project";
 		try {
 			console.log(`  ${chalk.dim("Cloning repo for task execution...")}`);
-			await ensureRepoClone(projectName, config.repo, config.branch);
+			await ensureRepoClone(projectName, validatedConfig.repo, validatedConfig.branch);
 			console.log(`  ${chalk.green("✓")} Repo cloned for worktree use`);
 		} catch (err) {
 			console.log(
