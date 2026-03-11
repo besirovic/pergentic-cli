@@ -1,6 +1,8 @@
-import { existsSync, readFileSync, createReadStream } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { daemonLogPath } from "../config/paths";
+import { LIMITS } from "../config/constants";
+import { readLastLines } from "../utils/read-last-lines";
 import { error } from "../utils/ui";
 
 const DEFAULT_LOG_LINES = 50;
@@ -44,9 +46,17 @@ export async function logs(opts: {
 
   const count = parseInt(opts.lines, 10) || DEFAULT_LOG_LINES;
 
-  // Read last N lines
-  const content = readFileSync(logFile, "utf-8");
-  let lines = content.split("\n").filter(Boolean);
+  const fileSize = statSync(logFile).size;
+  if (fileSize > LIMITS.LOG_SIZE_WARNING_BYTES) {
+    console.log(
+      `Warning: Log file is ${Math.round(fileSize / (1024 * 1024))}MB. Consider using 'tail -f ${logFile}' for large files.`,
+    );
+  }
+
+  // When filtering by project we need more lines since many will be filtered out.
+  // For large files, read a generous multiple; for small files readLastLines reads everything.
+  const readCount = opts.project ? count * 20 : count;
+  let lines = readLastLines(logFile, readCount);
 
   if (opts.project) {
     lines = lines.filter((line) => {
@@ -57,10 +67,10 @@ export async function logs(opts: {
         return false;
       }
     });
+    lines = lines.slice(-count);
   }
 
-  const lastN = lines.slice(-count);
-  for (const line of lastN) {
+  for (const line of lines) {
     console.log(parseLogLine(line));
   }
 
