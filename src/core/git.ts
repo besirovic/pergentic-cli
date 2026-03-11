@@ -9,6 +9,9 @@ const GitHubPRSchema = z.object({
   number: z.number(),
 });
 const GitHubPRListSchema = z.array(GitHubPRSchema);
+const GitHubCommentSchema = z.object({
+  id: z.number(),
+});
 
 export function parseOwnerRepo(repo: string): { owner: string; repo: string; hostname: string } {
   // Handle SSH: git@<any-host>:owner/repo.git
@@ -253,9 +256,9 @@ export async function replyToPRComment(
     },
   );
 
-  const data = (await response.json()) as unknown;
-  const comment = data as Record<string, unknown>;
-  if (typeof comment.id !== "number") {
+  const data = await response.json();
+  const result = GitHubCommentSchema.safeParse(data);
+  if (!result.success) {
     throw new Error(`Unexpected GitHub API response when creating comment: ${JSON.stringify(data)}`);
   }
 }
