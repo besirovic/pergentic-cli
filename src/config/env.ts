@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import { envFilePath, projectEnvPath, projectConfigPath } from "./paths";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
@@ -207,14 +207,36 @@ export function migrateConfigSecrets(
 
   if (migratedFields.length === 0) return { migrated: false, fields: [] };
 
+  // Capture original .env content for rollback
+  const envFile = projectEnvPath(projectPath);
+  const originalEnvContent = existsSync(envFile)
+    ? readFileSync(envFile, "utf-8")
+    : null;
+
   // Write secrets to .env
   saveProjectEnv(projectPath, extracted);
 
-  // Remove secrets from config.yaml
-  for (const key of migratedFields) {
-    delete raw[key];
+  // Remove secrets from config.yaml — if this fails, roll back .env
+  try {
+    for (const key of migratedFields) {
+      delete raw[key];
+    }
+    writeFileSync(configFile, stringifyYaml(raw), "utf-8");
+  } catch (err) {
+    // Rollback: restore .env to its pre-migration state
+    if (originalEnvContent === null) {
+      // .env didn't exist before — remove it
+      try {
+        unlinkSync(envFile);
+      } catch {
+        // best-effort cleanup
+      }
+    } else {
+      writeFileSync(envFile, originalEnvContent, "utf-8");
+    }
+    invalidateConfigCache(projectPath);
+    throw err;
   }
-  writeFileSync(configFile, stringifyYaml(raw), "utf-8");
 
   return { migrated: true, fields: migratedFields };
 }
