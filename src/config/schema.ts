@@ -24,9 +24,18 @@ const DesktopNotificationSchema = z.object({
 	}),
 });
 
+const SAFE_HOSTNAME_RE = /^[a-zA-Z0-9]([a-zA-Z0-9.\-]*[a-zA-Z0-9])?$/;
+
 const RemoteSchema = z.object({
-	host: z.string(),
-	port: z.number().default(DEFAULT_STATUS_PORT),
+	host: z
+		.string()
+		.min(1)
+		.max(253)
+		.regex(
+			SAFE_HOSTNAME_RE,
+			"host must be a valid hostname (alphanumeric, dots, hyphens only; must not start or end with a hyphen or dot)",
+		),
+	port: z.number().int().min(1).max(65535).default(DEFAULT_STATUS_PORT),
 });
 
 const NotificationsSchema = z.object({
