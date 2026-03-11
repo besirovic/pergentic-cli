@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { buildSafeEnv, resolveEditor, spawnAsync } from "./process";
+import { buildSafeEnv, resolveEditor, spawnAsync, SIGKILL_DELAY_MS } from "./process";
 
 describe("buildSafeEnv", () => {
 	it("includes whitelisted env vars", () => {
@@ -131,5 +131,47 @@ describe("spawnAsync output capping", () => {
 		]);
 		expect(result.stdout).toContain(TRUNCATION_PREFIX);
 		expect(result.stdout).toContain("Z".repeat(1000));
+	});
+});
+
+describe("spawnAsync SIGKILL escalation", () => {
+	it("sends SIGKILL when process ignores SIGTERM", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+		// Spawn a process that traps SIGTERM and stays alive
+		const script = `
+			process.on('SIGTERM', () => {});
+			setInterval(() => {}, 1000);
+		`;
+
+		await expect(
+			spawnAsync("node", ["-e", script], { timeout: 100, sigkillDelay: 200 }),
+		).rejects.toThrow("Process timed out");
+
+		expect(warnSpy).toHaveBeenCalledWith(
+			expect.stringContaining("sending SIGKILL"),
+		);
+		warnSpy.mockRestore();
+	});
+
+	it("does not send SIGKILL when process exits after SIGTERM", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+		// Spawn a process that exits normally on SIGTERM (default behavior)
+		const script = "setInterval(() => {}, 1000);";
+
+		await expect(
+			spawnAsync("node", ["-e", script], { timeout: 100, sigkillDelay: 200 }),
+		).rejects.toThrow("Process timed out");
+
+		// Process should exit from SIGTERM before SIGKILL timer fires
+		expect(warnSpy).not.toHaveBeenCalledWith(
+			expect.stringContaining("sending SIGKILL"),
+		);
+		warnSpy.mockRestore();
+	});
+
+	it("exports SIGKILL_DELAY_MS constant", () => {
+		expect(SIGKILL_DELAY_MS).toBe(10_000);
 	});
 });

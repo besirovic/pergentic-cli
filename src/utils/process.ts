@@ -58,6 +58,8 @@ export interface SpawnOpts {
   cwd?: string;
   env?: Record<string, string | undefined>;
   timeout?: number;
+  /** Delay before escalating SIGTERM to SIGKILL (defaults to SIGKILL_DELAY_MS). */
+  sigkillDelay?: number;
 }
 
 const WHITELISTED_ENV_KEYS = [
@@ -144,20 +146,30 @@ export function spawnAsync(
     });
 
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let sigkillTimer: ReturnType<typeof setTimeout> | undefined;
     if (opts.timeout) {
       timer = setTimeout(() => {
         timedOut = true;
         child.kill("SIGTERM");
+        sigkillTimer = setTimeout(() => {
+          console.warn(
+            `[pergentic] Process ${child.pid} did not exit after SIGTERM, sending SIGKILL`,
+          );
+          child.kill("SIGKILL");
+        }, opts.sigkillDelay ?? SIGKILL_DELAY_MS);
+        sigkillTimer.unref();
       }, opts.timeout);
     }
 
     child.on("error", (err) => {
       if (timer) clearTimeout(timer);
+      if (sigkillTimer) clearTimeout(sigkillTimer);
       reject(err);
     });
 
     child.on("close", (exitCode) => {
       if (timer) clearTimeout(timer);
+      if (sigkillTimer) clearTimeout(sigkillTimer);
       if (timedOut) {
         reject(new Error(`Process timed out after ${opts.timeout}ms`));
         return;
