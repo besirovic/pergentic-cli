@@ -5,11 +5,21 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 export function readYaml(filePath: string): unknown {
   if (!existsSync(filePath)) return {};
   const raw = readFileSync(filePath, "utf-8");
-  return parseYaml(raw) ?? {};
+  try {
+    return parseYaml(raw) ?? {};
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to parse YAML config at ${filePath}: ${message}`);
+  }
 }
 
 export function writeYaml(filePath: string, data: unknown): void {
   const dir = dirname(filePath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(filePath, stringifyYaml(data), "utf-8");
+  try {
+    writeFileSync(filePath, stringifyYaml(data), "utf-8");
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to write YAML config at ${filePath}: ${message}`);
+  }
 }

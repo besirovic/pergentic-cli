@@ -12,6 +12,7 @@ import {
 	ensureGlobalConfigDir,
 	readRawGlobalConfig,
 } from "./loader";
+import { readYaml } from "./yaml-io";
 
 const TEST_HOME = join("/tmp", `pergentic-test-${process.pid}`);
 
@@ -150,5 +151,21 @@ describe("config loader", () => {
 	it("readRawGlobalConfig returns empty object when file missing", () => {
 		const raw = readRawGlobalConfig();
 		expect(raw).toEqual({});
+	});
+
+	it("readYaml throws error with file path for malformed YAML", () => {
+		const malformedPath = join(TEST_HOME, "malformed.yaml");
+		writeFileSync(malformedPath, "key: [\ninvalid: yaml\n", "utf-8");
+
+		expect(() => readYaml(malformedPath)).toThrow(
+			/Failed to parse YAML config at .*malformed\.yaml/,
+		);
+	});
+
+	it("readYaml returns {} for empty files", () => {
+		const emptyPath = join(TEST_HOME, "empty.yaml");
+		writeFileSync(emptyPath, "", "utf-8");
+
+		expect(readYaml(emptyPath)).toEqual({});
 	});
 });
