@@ -29,6 +29,7 @@ export class ScheduledCommandRunner {
     worktree: WorktreeInfo,
     command: string,
     startTime: number,
+    timeoutMs: number = 1_800_000,
   ): Promise<{ success: boolean; prUrl?: string }> {
     const { payload } = task;
     const ctx: TaskContext = { taskId: payload.taskId, title: payload.title, project: projectName };
@@ -36,7 +37,7 @@ export class ScheduledCommandRunner {
       ...(projectConfig.githubToken && { GITHUB_TOKEN: projectConfig.githubToken }),
     };
 
-    const result = await execCommand(command, worktree.path, agentEnv);
+    const result = await execCommand(command, worktree.path, agentEnv, timeoutMs);
     const duration = Math.floor((Date.now() - startTime) / 1000);
 
     if (!result.success) {

@@ -116,6 +116,7 @@ export class Scheduler {
 					scheduleId: schedule.id,
 					schedulePrBehavior: schedule.prBehavior,
 					schedulePrBranch: schedule.prBranch,
+					scheduleTimeout: schedule.scheduleTimeout,
 					branch: schedule.branch,
 					targetAgents: schedule.agent ? [schedule.agent] : undefined,
 				},

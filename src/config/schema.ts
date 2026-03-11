@@ -165,6 +165,8 @@ export const ScheduleEntrySchema = z.object({
 	branch: z.string().default("main"),
 	prBehavior: PRBehavior.default("new"),
 	prBranch: z.string().nullable().default(null),
+	/** Per-command timeout in milliseconds (default: 1800000 = 30 minutes). */
+	scheduleTimeout: z.number().min(1000).default(1_800_000).optional(),
 	enabled: z.boolean().default(true),
 	lastRun: z.string().nullable().default(null),
 	createdAt: z.string(),
