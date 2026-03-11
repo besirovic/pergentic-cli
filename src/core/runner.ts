@@ -177,12 +177,25 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
   async waitForAll(timeoutMs: number = 300_000): Promise<void> {
     if (this.active.size === 0 && this.pendingPromises.size === 0) return;
     return new Promise((resolve) => {
+      let resolved = false;
       const check = setInterval(() => {
-        if (this.active.size === 0 && this.pendingPromises.size === 0) { clearInterval(check); clearTimeout(timer); resolve(); }
+        if (resolved) return;
+        if (this.active.size === 0 && this.pendingPromises.size === 0) {
+          resolved = true;
+          clearInterval(check);
+          clearTimeout(timer);
+          resolve();
+        }
       }, PROCESS_CHECK_INTERVAL_MS);
       const timer = setTimeout(() => {
+        if (resolved) return;
+        resolved = true;
         clearInterval(check);
-        for (const [id, a] of this.active) { a.abortController.abort(); a.process?.kill("SIGKILL"); this.active.delete(id); }
+        for (const [id, a] of this.active) {
+          a.abortController.abort();
+          a.process?.kill("SIGKILL");
+          this.active.delete(id);
+        }
         resolve();
       }, timeoutMs);
     });
