@@ -88,7 +88,7 @@ export class VerificationRunner {
         fixActiveEntry.process = fixHandle.process;
       } else {
         // Task was cancelled during verification fix — kill immediately
-        fixHandle.process.kill("SIGTERM");
+        fixHandle.process?.kill("SIGTERM");
         return false;
       }
       const fixResult = await fixHandle.result;
