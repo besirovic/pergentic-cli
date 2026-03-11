@@ -44,6 +44,10 @@ interface ActiveTask {
   worktree: WorktreeInfo;
   startTime: number;
   abortController: AbortController;
+  /** Pending SIGKILL escalation timer; cleared when process exits or task is force-killed. */
+  sigkillTimer?: ReturnType<typeof setTimeout>;
+  /** True once cancelTask has been called; makes isActive() return false so executors stop. */
+  cancelled?: boolean;
 }
 
 export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
@@ -112,7 +116,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
         { taskId: task.payload.taskId, title: task.payload.title, project: projectName },
         duration, String(err), projectConfig,
       );
-      this.active.delete(task.id);
+      this.clearActiveTask(task.id);
       this.emit("taskFailed", task, err);
       return false;
     }
@@ -134,21 +138,31 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       const duration = Math.floor((Date.now() - startTime) / 1000);
       if (result.success) {
         if (!result.lifecycleHandled) await this.deps.lifecycle.recordSuccess(lCtx, duration, result.prUrl ?? "", projectConfig);
-        this.active.delete(task.id);
+        this.clearActiveTask(task.id);
         this.emit("taskCompleted", task, { duration, projectConfig, prUrl: result.prUrl, prNumber: result.prNumber, worktreePath: ctx.worktree.path });
         logger.info({ taskId: task.id, duration }, "Task completed successfully");
       } else {
         if (!result.lifecycleHandled) await this.deps.lifecycle.recordFailure(lCtx, duration, result.error ?? "Unknown error", projectConfig, result.retriesAttempted);
-        this.active.delete(task.id);
+        this.clearActiveTask(task.id);
         this.emit("taskFailed", task, new Error(result.error ?? "Task failed"));
       }
     } catch (err) {
       logger.error({ taskId: task.id, err }, "Unhandled error in task execution");
       const duration = Math.floor((Date.now() - startTime) / 1000);
       await this.deps.lifecycle.recordFailure(lCtx, duration, String(err), projectConfig);
-      this.active.delete(task.id);
+      this.clearActiveTask(task.id);
       this.emit("taskFailed", task, err);
     }
+  }
+
+  /** Clear the SIGKILL escalation timer (if any) and remove the task from the active map. */
+  private clearActiveTask(taskId: string): void {
+    const active = this.active.get(taskId);
+    if (active?.sigkillTimer) {
+      clearTimeout(active.sigkillTimer);
+      active.sigkillTimer = undefined;
+    }
+    this.active.delete(taskId);
   }
 
   isActive(taskId: string): boolean { return this.active.has(taskId); }
@@ -156,14 +170,20 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
   cancelTask(taskId: string): boolean {
     const active = this.active.get(taskId);
     if (!active) return false;
+    active.cancelled = true;
     active.abortController.abort();
-    active.process?.kill("SIGTERM");
     if (active.process) {
       const proc = active.process;
-      const t = setTimeout(() => { try { proc.kill("SIGKILL"); } catch { /* dead */ } }, SIGKILL_DELAY_MS);
+      const t = setTimeout(() => {
+        active.sigkillTimer = undefined;
+        try { proc.kill("SIGKILL"); } catch { /* already dead */ }
+      }, SIGKILL_DELAY_MS);
       t.unref();
+      active.sigkillTimer = t;
+      proc.kill("SIGTERM");
     }
-    this.active.delete(taskId);
+    // Leave the entry in `active` so waitForAll can track and force-kill if needed.
+    // handleExecution will remove it once the process actually exits.
     return true;
   }
 
@@ -192,6 +212,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
         resolved = true;
         clearInterval(check);
         for (const [id, a] of this.active) {
+          if (a.sigkillTimer) { clearTimeout(a.sigkillTimer); a.sigkillTimer = undefined; }
           a.abortController.abort();
           a.process?.kill("SIGKILL");
           this.active.delete(id);

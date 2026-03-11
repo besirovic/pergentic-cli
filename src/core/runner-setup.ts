@@ -53,7 +53,7 @@ export function buildExecutorContext(
   task: Task, projectConfig: ProjectConfig, projectPath: string,
   projectName: string, worktree: WorktreeInfo, startTime: number,
   signal: AbortSignal, agentResolver: AgentResolver,
-  activeMap: Map<string, { process: import("node:child_process").ChildProcess | null }>,
+  activeMap: Map<string, { process: import("node:child_process").ChildProcess | null; cancelled?: boolean }>,
 ): ExecutorContext {
   const rawAgentName = task.payload.targetAgents?.[0] ?? projectConfig.agent;
   const agentParseResult = AgentName.safeParse(rawAgentName);
@@ -68,7 +68,7 @@ export function buildExecutorContext(
   return {
     task, projectConfig, projectName, projectPath, worktree, startTime, signal,
     setProcess: (proc) => { const e = activeMap.get(task.id); if (e) e.process = proc; },
-    isActive: () => activeMap.has(task.id),
+    isActive: () => { const e = activeMap.get(task.id); return e !== undefined && !e.cancelled; },
     getActiveEntry: () => activeMap.get(task.id) ?? undefined,
     agent, agentName: parsedAgent,
     baseAgentEnv: {
