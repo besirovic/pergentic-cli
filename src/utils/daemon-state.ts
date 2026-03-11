@@ -26,6 +26,7 @@ const DaemonStateSchema = z.object({
 			estimatedCost: z.number().default(0),
 		})
 		.default({}),
+	lastUpdated: z.number().optional(),
 });
 
 export type DaemonState = z.infer<typeof DaemonStateSchema>;

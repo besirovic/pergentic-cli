@@ -33,6 +33,7 @@ const CancelRequestSchema = z.object({
 });
 
 let shuttingDown = false;
+let stateWriteFailures = 0;
 
 let statsCache: { data: { tasks: number; prs: number; failed: number; estimatedCost: number }; timestamp: number } | null = null;
 
@@ -283,12 +284,19 @@ async function updateState(runner: TaskRunner, queue: TaskQueue): Promise<void> 
 		activeTasks: runner.activeTasks,
 		queuedTasks: queue.length,
 		todayStats: await loadTodayStats(),
+		lastUpdated: Date.now(),
 	};
 
 	try {
 		await atomicWriteFileAsync(stateFilePath(), JSON.stringify(state, null, 2));
+		stateWriteFailures = 0;
 	} catch (err) {
-		logger.warn({ err }, "Failed to write daemon state file");
+		stateWriteFailures++;
+		if (stateWriteFailures >= 3) {
+			logger.warn({ err, consecutiveFailures: stateWriteFailures }, "State file write failing repeatedly — daemon state is stale");
+		} else {
+			logger.warn({ err }, "Failed to write daemon state file");
+		}
 	}
 }
 

@@ -5,7 +5,7 @@ import { error } from "../utils/ui";
 import { loadGlobalConfig } from "../config/loader";
 import { readState, type DaemonState } from "../utils/daemon-state";
 import { formatDuration } from "../utils/format";
-import { TIMEOUTS } from "../config/constants";
+import { TIMEOUTS, DAEMON } from "../config/constants";
 import { isValidHostname, isValidPort } from "../utils/project-validation";
 
 function getFreePort(): Promise<number> {
@@ -105,6 +105,8 @@ async function fetchRemoteStatus(remoteName: string): Promise<void> {
 	}
 }
 
+const STATE_STALE_THRESHOLD_MS = DAEMON.STATE_UPDATE_INTERVAL_MS * 2;
+
 function renderStatus(state: DaemonState, label?: string): void {
 	const prefix = label ? ` (${label})` : "";
 	const icon = state.status === "running" ? "●" : "○";
@@ -115,6 +117,9 @@ function renderStatus(state: DaemonState, label?: string): void {
 			state.activeTasks.length
 		} active tasks`
 	);
+	if (state.lastUpdated !== undefined && Date.now() - state.lastUpdated > STATE_STALE_THRESHOLD_MS) {
+		console.log(`  ⚠ State data is stale (last updated ${formatDuration(Math.floor((Date.now() - state.lastUpdated) / 1000))} ago)`);
+	}
 	if (state.todayStats) {
 		console.log(
 			`  Today: ${state.todayStats.tasks} tasks · ${
