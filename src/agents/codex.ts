@@ -33,7 +33,7 @@ export const codex: Agent = {
       args.push("--model", options.model);
     }
 
-    const totalLength = args.reduce((sum, a) => sum + a.length, 0);
+    const totalLength = args.reduce((sum, a) => sum + Buffer.byteLength(a), 0);
     if (totalLength > 64 * 1024) {
       throw new Error(
         `Agent command args exceed 64KB limit (${totalLength} bytes). Reduce prompt size before dispatching.`
