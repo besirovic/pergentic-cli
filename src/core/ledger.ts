@@ -1,5 +1,6 @@
 import { existsSync, createReadStream, createWriteStream } from "node:fs";
-import { readFile, rename, unlink, copyFile } from "node:fs/promises";
+import { readFile, rename, unlink, copyFile, open } from "node:fs/promises";
+import { dirname } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { dispatchedLedgerPath } from "../config/paths";
@@ -134,7 +135,26 @@ export class DispatchLedger {
     try {
       // pipeline() destroys all streams on error — no orphaned handles
       await pipeline(readStream, lineFilter, writeStream);
+
+      // fsync the tmp file to guarantee all written bytes reach disk before rename
+      const tmpFh = await open(tmpPath, "r");
+      try {
+        await tmpFh.sync();
+      } finally {
+        await tmpFh.close();
+      }
+
       await rename(tmpPath, this.filePath);
+
+      // fsync the directory to guarantee the rename metadata persists to disk
+      const dirFh = await open(dirname(this.filePath), "r");
+      try {
+        await dirFh.sync();
+      } finally {
+        await dirFh.close();
+      }
+
+      // Only update in-memory state after both fsyncs succeed
       this.dispatched = retainedIds;
       logger.info({ retained: retainedCount, skipped: skippedCount, maxAgeDays }, "Pruned dispatch ledger");
     } catch (err) {
