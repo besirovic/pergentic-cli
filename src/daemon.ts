@@ -65,9 +65,7 @@ async function main(): Promise<void> {
 	ensureGlobalConfigDir();
 
 	if (!acquireLock()) {
-		logger.fatal("Another instance of Pergentic is already running. Exiting.");
-		console.error("Error: Another instance of Pergentic is already running.");
-		console.error("Run `pergentic stop` to stop it first.");
+		logger.fatal("Another instance of Pergentic is already running. Run `pergentic stop` to stop it first.");
 		process.exit(1);
 	}
 
