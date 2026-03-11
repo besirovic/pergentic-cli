@@ -35,34 +35,85 @@ export function parseOwnerRepo(repo: string): { owner: string; repo: string; hos
   throw new Error(`Cannot parse owner/repo from: ${repo}`);
 }
 
+/** Captures current branch and last commit hash for error context. Never throws. */
+async function getGitContext(worktreePath: string): Promise<{ branch: string; lastCommit: string }> {
+  try {
+    const git = simpleGit(worktreePath);
+    const [branch, log] = await Promise.all([
+      git.revparse(["--abbrev-ref", "HEAD"]),
+      git.log({ maxCount: 1 }),
+    ]);
+    return { branch: branch.trim(), lastCommit: log.latest?.hash ?? "unknown" };
+  } catch {
+    return { branch: "unknown", lastCommit: "unknown" };
+  }
+}
+
+/**
+ * Stages all tracked files (excluding .claude-history.json and pr-body) and commits.
+ * Fatal: merge conflicts, nothing to commit, locked index.
+ */
 export async function commitAll(
   worktreePath: string,
   message: string,
 ): Promise<void> {
   const git = simpleGit(worktreePath);
-  await git.add([".", ":!.claude-history.json", `:!${PR_BODY_OUTPUT_FILE}`]);
-  await git.commit(message);
-  logger.info({ worktreePath, message }, "Committed changes");
+  try {
+    await git.add([".", ":!.claude-history.json", `:!${PR_BODY_OUTPUT_FILE}`]);
+    await git.commit(message);
+    logger.info({ worktreePath, message }, "Committed changes");
+  } catch (err) {
+    const ctx = await getGitContext(worktreePath);
+    logger.error({ err, worktreePath, message, ...ctx }, "Git commit failed");
+    throw new Error(
+      `Git commit failed on branch '${ctx.branch}' (last commit: ${ctx.lastCommit}): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
 
+/**
+ * Pushes a branch to origin.
+ * Recoverable: transient network errors (caller may retry).
+ * Fatal: push rejected (non-fast-forward without force).
+ */
 export async function pushBranch(
   worktreePath: string,
   branch: string,
 ): Promise<void> {
   const git = simpleGit(worktreePath);
-  await git.push("origin", branch);
-  logger.info({ worktreePath, branch }, "Pushed branch");
+  try {
+    await git.push("origin", branch);
+    logger.info({ worktreePath, branch }, "Pushed branch");
+  } catch (err) {
+    const ctx = await getGitContext(worktreePath);
+    logger.error({ err, worktreePath, branch, ...ctx }, "Git push failed");
+    throw new Error(
+      `Git push of '${branch}' failed on branch '${ctx.branch}' (last commit: ${ctx.lastCommit}): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
 
+/**
+ * Amends the last commit with all staged changes and force-pushes.
+ * Fatal: no previous commit to amend, push rejected without proper force authorization.
+ */
 export async function amendAndForcePush(
   worktreePath: string,
   branch: string,
 ): Promise<void> {
   const git = simpleGit(worktreePath);
-  await git.add("-A");
-  await git.commit("", { "--amend": null, "--no-edit": null });
-  await git.push("origin", branch, ["--force"]);
-  logger.info({ worktreePath, branch }, "Amended and force-pushed");
+  try {
+    await git.add("-A");
+    await git.commit("", { "--amend": null, "--no-edit": null });
+    await git.push("origin", branch, ["--force"]);
+    logger.info({ worktreePath, branch }, "Amended and force-pushed");
+  } catch (err) {
+    const ctx = await getGitContext(worktreePath);
+    logger.error({ err, worktreePath, branch, ...ctx }, "Git amend and force-push failed");
+    throw new Error(
+      `Git amend/force-push of '${branch}' failed on branch '${ctx.branch}' (last commit: ${ctx.lastCommit}): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
 
 export interface PROptions {
@@ -224,10 +275,23 @@ export async function getChangeSummary(
   return { stats, commitMessage };
 }
 
+/**
+ * Pulls a branch from origin.
+ * Recoverable: transient network errors (caller may retry).
+ * Fatal: merge conflict on pull.
+ */
 export async function pullBranch(
   worktreePath: string,
   branch: string,
 ): Promise<void> {
   const git = simpleGit(worktreePath);
-  await git.pull("origin", branch);
+  try {
+    await git.pull("origin", branch);
+  } catch (err) {
+    const ctx = await getGitContext(worktreePath);
+    logger.error({ err, worktreePath, branch, ...ctx }, "Git pull failed");
+    throw new Error(
+      `Git pull of '${branch}' failed on branch '${ctx.branch}' (last commit: ${ctx.lastCommit}): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
