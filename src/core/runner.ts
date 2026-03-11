@@ -52,6 +52,7 @@ interface ActiveTask {
 
 export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
   private active = new Map<string, ActiveTask>();
+  private pendingPromises = new Set<Promise<void>>();
   private maxConcurrent: number;
   private globalConfig: GlobalConfig;
   private deps: RunnerDeps;
@@ -189,14 +190,22 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       this.emit("taskStarted", task);
       await this.deps.lifecycle.recordStart(ctx);
 
-      this.executeTask(
+      const p = this.executeTask(
         task, projectConfig, projectName, worktree, agentCmd, agentEnv,
         agentOptions, agent, startTime,
       ).catch((err) => {
-        logger.error({ taskId: task.id, err }, "Unhandled error in task execution");
-        this.active.delete(task.id);
-        this.emit("taskFailed", task, err);
+        try {
+          logger.error({ taskId: task.id, err }, "Unhandled error in task execution");
+          this.active.delete(task.id);
+          this.emit("taskFailed", task, err);
+        } catch (innerErr) {
+          console.error("Critical: error handler failed for task", task.id, innerErr);
+          this.active.delete(task.id);
+        }
+      }).finally(() => {
+        this.pendingPromises.delete(p);
       });
+      this.pendingPromises.add(p);
 
       return true;
     } catch (err) {
@@ -442,30 +451,43 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
 
     const timeoutMs = (payload as ScheduledPayload).scheduleTimeout;
 
-    this.deps.scheduledRunner.execute(
+    const p = this.deps.scheduledRunner.execute(
       task, projectConfig, projectName, worktree, command, startTime, timeoutMs,
     ).then((result) => {
-      this.active.delete(task.id);
-      if (result.success) {
-        this.emit("taskCompleted", task);
-      } else {
-        this.emit("taskFailed", task, new Error("Scheduled command failed"));
+      try {
+        this.active.delete(task.id);
+        if (result.success) {
+          this.emit("taskCompleted", task);
+        } else {
+          this.emit("taskFailed", task, new Error("Scheduled command failed"));
+        }
+      } catch (innerErr) {
+        console.error("Critical: success handler failed for scheduled task", task.id, innerErr);
+        this.active.delete(task.id);
       }
     }).catch((err) => {
-      logger.error({ taskId: task.id, err }, "Unhandled error in scheduled command execution");
-      this.active.delete(task.id);
-      this.emit("taskFailed", task, err);
+      try {
+        logger.error({ taskId: task.id, err }, "Unhandled error in scheduled command execution");
+        this.active.delete(task.id);
+        this.emit("taskFailed", task, err);
+      } catch (innerErr) {
+        console.error("Critical: error handler failed for scheduled task", task.id, innerErr);
+        this.active.delete(task.id);
+      }
+    }).finally(() => {
+      this.pendingPromises.delete(p);
     });
+    this.pendingPromises.add(p);
 
     return true;
   }
 
   async waitForAll(timeoutMs: number = 300_000): Promise<void> {
-    if (this.active.size === 0) return;
+    if (this.active.size === 0 && this.pendingPromises.size === 0) return;
 
     return new Promise((resolve) => {
       const check = setInterval(() => {
-        if (this.active.size === 0) {
+        if (this.active.size === 0 && this.pendingPromises.size === 0) {
           clearInterval(check);
           clearTimeout(timer);
           resolve();
@@ -479,6 +501,8 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
           active.process?.kill("SIGKILL");
           this.active.delete(id);
         }
+        // Resolve even if pending promises remain — they'll settle on their own
+        // after the active tasks they depend on are killed above
         resolve();
       }, timeoutMs);
     });
