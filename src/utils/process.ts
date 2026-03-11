@@ -87,10 +87,10 @@ export function buildSafeEnv(
   return { ...safe, ...overrides };
 }
 
-const MAX_OUTPUT = 8192;
-const TRUNCATION_PREFIX = "[Output truncated to last 8KB]\n";
+export const MAX_OUTPUT = 8192;
+export const TRUNCATION_PREFIX = "[Output truncated to last 8KB]\n";
 
-function capBuffer(
+export function capBuffer(
   chunks: Buffer[],
   len: number,
 ): { chunks: Buffer[]; len: number; truncated: boolean } {

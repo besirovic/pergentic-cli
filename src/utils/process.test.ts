@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { buildSafeEnv, resolveEditor, spawnAsync, SIGKILL_DELAY_MS } from "./process";
+import { buildSafeEnv, capBuffer, MAX_OUTPUT, resolveEditor, spawnAsync, SIGKILL_DELAY_MS } from "./process";
 
 describe("buildSafeEnv", () => {
 	it("includes whitelisted env vars", () => {
@@ -100,6 +100,81 @@ describe("resolveEditor", () => {
 			process.env.EDITOR = editor;
 			expect(resolveEditor()).toBe(editor);
 		}
+	});
+});
+
+describe("capBuffer", () => {
+	it("returns not truncated for empty chunks", () => {
+		const chunks: Buffer[] = [];
+		const result = capBuffer(chunks, 0);
+		expect(result.truncated).toBe(false);
+		expect(result.len).toBe(0);
+		expect(result.chunks).toEqual([]);
+	});
+
+	it("returns not truncated when total length is under limit", () => {
+		const chunks = [Buffer.alloc(100, "a"), Buffer.alloc(100, "b")];
+		const result = capBuffer(chunks, 200);
+		expect(result.truncated).toBe(false);
+		expect(result.len).toBe(200);
+		expect(result.chunks).toHaveLength(2);
+	});
+
+	it("returns not truncated when total length equals MAX_OUTPUT", () => {
+		const chunks = [Buffer.alloc(MAX_OUTPUT, "a")];
+		const result = capBuffer(chunks, MAX_OUTPUT);
+		expect(result.truncated).toBe(false);
+		expect(result.len).toBe(MAX_OUTPUT);
+	});
+
+	it("truncates by dropping leading chunks when multiple chunks exceed limit", () => {
+		// Two 5KB chunks → total 10KB, exceeds 8KB
+		const chunk1 = Buffer.alloc(5120, "a");
+		const chunk2 = Buffer.alloc(5120, "b");
+		const chunks = [chunk1, chunk2];
+		const result = capBuffer(chunks, 10240);
+		expect(result.truncated).toBe(true);
+		// chunk1 dropped; chunk2 (5KB) ≤ MAX_OUTPUT so loop stops
+		expect(result.chunks).toHaveLength(1);
+		expect(result.chunks[0]).toBe(chunk2);
+		expect(result.len).toBe(5120);
+	});
+
+	it("truncates a single oversized chunk to the last MAX_OUTPUT bytes", () => {
+		const data = Buffer.allocUnsafe(MAX_OUTPUT * 2);
+		data.fill(0x41, 0, MAX_OUTPUT);      // first half: 'A'
+		data.fill(0x42, MAX_OUTPUT);          // second half: 'B'
+		const chunks = [data];
+		const result = capBuffer(chunks, data.length);
+		expect(result.truncated).toBe(true);
+		expect(result.len).toBe(MAX_OUTPUT);
+		expect(result.chunks[0].length).toBe(MAX_OUTPUT);
+		// Kept bytes should be the trailing 'B' half
+		expect(result.chunks[0].every((b) => b === 0x42)).toBe(true);
+	});
+
+	it("drains leading chunks until total len fits within MAX_OUTPUT", () => {
+		// Four 3KB chunks → 12KB total.
+		// Loop drops from front while len > MAX_OUTPUT AND chunks.length > 1:
+		//   drop chunk[0]: len = 9216 (still > 8192, keep going)
+		//   drop chunk[1]: len = 6144 (≤ 8192, stop)
+		// Result: two trailing chunks remaining.
+		const makeChunk = (fill: number) => Buffer.alloc(3072, fill);
+		const chunks = [makeChunk(1), makeChunk(2), makeChunk(3), makeChunk(4)];
+		const result = capBuffer(chunks, 3072 * 4);
+		expect(result.truncated).toBe(true);
+		expect(result.chunks).toHaveLength(2);
+		expect(result.chunks[0].every((b) => b === 3)).toBe(true);
+		expect(result.chunks[1].every((b) => b === 4)).toBe(true);
+	});
+
+	it("mutates the input chunks array in place", () => {
+		const chunk1 = Buffer.alloc(5000, "x");
+		const chunk2 = Buffer.alloc(5000, "y");
+		const chunks = [chunk1, chunk2];
+		capBuffer(chunks, 10000);
+		// chunk1 should have been shifted out
+		expect(chunks).toHaveLength(1);
 	});
 });
 

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { logger } from "../utils/logger";
 import { redactString } from "../utils/redact";
-import { buildSafeEnv, SIGKILL_DELAY_MS } from "../utils/process";
+import { buildSafeEnv, capBuffer, MAX_OUTPUT, SIGKILL_DELAY_MS, TRUNCATION_PREFIX } from "../utils/process";
 import type { AgentCommand } from "../agents/types";
 import type { SpawnResult } from "../utils/process";
 
@@ -175,31 +175,28 @@ export function spawnAgentAndWait(
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  const MAX_OUTPUT = 8192;
-  let stdoutBuf = Buffer.alloc(0);
-  let stderrBuf = Buffer.alloc(0);
+  const stdoutChunks: Buffer[] = [];
+  const stderrChunks: Buffer[] = [];
+  let stdoutLen = 0;
+  let stderrLen = 0;
   let stdoutTruncated = false;
   let stderrTruncated = false;
   let timedOut = false;
 
   child.stdout?.on("data", (chunk: Buffer) => {
-    const combined = Buffer.concat([stdoutBuf, chunk]);
-    if (combined.length > MAX_OUTPUT) {
-      stdoutBuf = combined.subarray(combined.length - MAX_OUTPUT);
-      stdoutTruncated = true;
-    } else {
-      stdoutBuf = combined;
-    }
+    stdoutChunks.push(chunk);
+    stdoutLen += chunk.length;
+    const capped = capBuffer(stdoutChunks, stdoutLen);
+    stdoutLen = capped.len;
+    if (capped.truncated) stdoutTruncated = true;
   });
 
   child.stderr?.on("data", (chunk: Buffer) => {
-    const combined = Buffer.concat([stderrBuf, chunk]);
-    if (combined.length > MAX_OUTPUT) {
-      stderrBuf = combined.subarray(combined.length - MAX_OUTPUT);
-      stderrTruncated = true;
-    } else {
-      stderrBuf = combined;
-    }
+    stderrChunks.push(chunk);
+    stderrLen += chunk.length;
+    const capped = capBuffer(stderrChunks, stderrLen);
+    stderrLen = capped.len;
+    if (capped.truncated) stderrTruncated = true;
   });
 
   let termTimer: ReturnType<typeof setTimeout> | undefined;
@@ -229,8 +226,8 @@ export function spawnAgentAndWait(
   const result = new Promise<SpawnResult>((resolve) => {
     child.on("close", (code) => {
       cleanup();
-      const stdout = stdoutBuf.toString("utf-8").trim();
-      const stderr = stderrBuf.toString("utf-8").trim();
+      const stdout = Buffer.concat(stdoutChunks).toString("utf-8").trim();
+      const stderr = Buffer.concat(stderrChunks).toString("utf-8").trim();
       if (timedOut) {
         resolve({
           exitCode: 1,
@@ -240,8 +237,8 @@ export function spawnAgentAndWait(
       } else {
         resolve({
           exitCode: code ?? 1,
-          stdout: stdoutTruncated ? `[Output truncated to last 8KB]\n${stdout}` : stdout,
-          stderr: stderrTruncated ? `[Output truncated to last 8KB]\n${stderr}` : stderr,
+          stdout: stdoutTruncated ? TRUNCATION_PREFIX + stdout : stdout,
+          stderr: stderrTruncated ? TRUNCATION_PREFIX + stderr : stderr,
         });
       }
     });
