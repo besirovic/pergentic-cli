@@ -198,15 +198,25 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
     if (this.active.size === 0 && this.pendingPromises.size === 0) return;
     return new Promise((resolve) => {
       let resolved = false;
+      const cleanup = () => {
+        clearInterval(check);
+        clearTimeout(timer);
+      };
       const check = setInterval(() => {
         if (resolved) return;
-        if (this.active.size === 0 && this.pendingPromises.size === 0) {
+        try {
+          if (this.active.size === 0 && this.pendingPromises.size === 0) {
+            resolved = true;
+            cleanup();
+            resolve();
+          }
+        } catch {
           resolved = true;
-          clearInterval(check);
-          clearTimeout(timer);
+          cleanup();
           resolve();
         }
       }, PROCESS_CHECK_INTERVAL_MS);
+      check.unref();
       const timer = setTimeout(() => {
         if (resolved) return;
         resolved = true;
@@ -219,6 +229,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
         }
         resolve();
       }, timeoutMs);
+      timer.unref();
     });
   }
 }
