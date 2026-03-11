@@ -274,6 +274,11 @@ async function main(): Promise<void> {
 		shutdown();
 	});
 
+	process.on("uncaughtException", (err: Error) => {
+		logger.fatal({ err }, "Uncaught exception — initiating graceful shutdown");
+		shutdown();
+	});
+
 	// Last-resort lock cleanup on unexpected exit
 	process.on("exit", () => {
 		releaseLock();
