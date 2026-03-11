@@ -25,6 +25,35 @@ export const PR_BODY_OUTPUT_FILE = ".pergentic/PR_BODY.md";
 const MAX_TEMPLATE_BYTES = 10 * 1024;
 
 /**
+ * Truncate a UTF-8 buffer to at most `maxBytes` without splitting multi-byte characters.
+ * Walks backward from the cutoff to find the last complete character boundary.
+ */
+export function truncateUtf8(buf: Buffer, maxBytes: number): Buffer {
+	if (buf.length <= maxBytes) return buf;
+
+	let end = maxBytes;
+	// If the byte at `end` is a UTF-8 continuation byte (10xxxxxx),
+	// walk backward to find the leading byte of the sequence.
+	while (end > 0 && (buf[end] & 0xc0) === 0x80) {
+		end--;
+	}
+	// `end` now points at a leading byte (or 0). Determine the expected
+	// character length and include it only if the full sequence fits.
+	if (end > 0) {
+		const leadByte = buf[end];
+		let charLen = 1;
+		if ((leadByte & 0xf8) === 0xf0) charLen = 4;
+		else if ((leadByte & 0xf0) === 0xe0) charLen = 3;
+		else if ((leadByte & 0xe0) === 0xc0) charLen = 2;
+		if (end + charLen <= maxBytes) {
+			end = end + charLen;
+		}
+		// else: character doesn't fit, cut before it (end stays as-is)
+	}
+	return buf.subarray(0, end);
+}
+
+/**
  * Read a template file with size guard.
  * Returns the content truncated to MAX_TEMPLATE_BYTES if necessary.
  */
@@ -35,7 +64,7 @@ async function readSafeTemplate(filePath: string): Promise<string> {
 			{ path: filePath, bytes: Buffer.byteLength(content, "utf-8"), maxBytes: MAX_TEMPLATE_BYTES },
 			"PR template exceeds size limit, truncating",
 		);
-		return Buffer.from(content, "utf-8").subarray(0, MAX_TEMPLATE_BYTES).toString("utf-8");
+		return truncateUtf8(Buffer.from(content, "utf-8"), MAX_TEMPLATE_BYTES).toString("utf-8");
 	}
 	return content;
 }
