@@ -74,7 +74,10 @@ export class Poller {
     }
 
     if (this.running) {
-      this.timer = setTimeout(() => this.tick(), this.pollInterval);
+      this.timer = setTimeout(() => {
+        if (!this.running) return;
+        this.tick();
+      }, this.pollInterval);
     }
   }
 
