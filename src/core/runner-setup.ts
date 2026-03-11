@@ -25,7 +25,12 @@ export async function prepareWorktree(
   }
 
   const rawAgentName = task.payload.targetAgents?.[0] ?? projectConfig.agent;
-  const parsedAgent = AgentName.catch("claude-code").parse(rawAgentName);
+  const agentParseResult = AgentName.safeParse(rawAgentName);
+  if (!agentParseResult.success) {
+    const validOptions = AgentName.options.join(", ");
+    throw new Error(`Invalid agent name "${rawAgentName}". Valid options are: ${validOptions}`);
+  }
+  const parsedAgent = agentParseResult.data;
 
   let resolvedBranchName: string | undefined;
   const branchTemplate = projectConfig.branching?.template;
@@ -51,7 +56,12 @@ export function buildExecutorContext(
   activeMap: Map<string, { process: import("node:child_process").ChildProcess | null }>,
 ): ExecutorContext {
   const rawAgentName = task.payload.targetAgents?.[0] ?? projectConfig.agent;
-  const parsedAgent = AgentName.catch("claude-code").parse(rawAgentName);
+  const agentParseResult = AgentName.safeParse(rawAgentName);
+  if (!agentParseResult.success) {
+    const validOptions = AgentName.options.join(", ");
+    throw new Error(`Invalid agent name "${rawAgentName}". Valid options are: ${validOptions}`);
+  }
+  const parsedAgent = agentParseResult.data;
   const agent = agentResolver.resolveAgent(parsedAgent);
   const allowedTools = projectConfig.agentTools?.[parsedAgent] ?? projectConfig.claude?.allowedTools;
 
