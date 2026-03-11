@@ -15,6 +15,7 @@ import {
 } from "./paths";
 import { loadSecrets, SECRET_FIELDS, validateSecretValue, type ResolvedSecrets } from "./env";
 import { readYaml, writeYaml } from "./yaml-io";
+import { invalidateConfigCache } from "./cache";
 import { logger } from "../utils/logger";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -80,6 +81,7 @@ export function saveProjectConfig(
   config: ProjectConfig,
 ): void {
   writeYaml(projectConfigPath(projectPath), config);
+  invalidateConfigCache(projectPath);
 }
 
 export function loadProjectsRegistry(): ProjectsRegistry {

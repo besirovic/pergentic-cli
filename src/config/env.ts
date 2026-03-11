@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { envFilePath, projectEnvPath, projectConfigPath } from "./paths";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { invalidateConfigCache } from "./cache";
 import { logger } from "../utils/logger";
 import type { ProjectConfig } from "./schema";
 
@@ -175,6 +176,7 @@ export function saveProjectEnv(
     ([key, value]) => `${key}=${value}`,
   );
   writeFileSync(filePath, lines.join("\n") + "\n", "utf-8");
+  invalidateConfigCache(projectPath);
 }
 
 export function migrateConfigSecrets(
