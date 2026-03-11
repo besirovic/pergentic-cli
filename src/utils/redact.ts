@@ -30,3 +30,20 @@ function isSensitive(value: string): boolean {
 export function redactArgs(args: readonly string[]): string[] {
 	return args.map((arg) => (isSensitive(arg) ? REDACTED : arg));
 }
+
+/**
+ * Redacts sensitive values embedded within a single string.
+ * Splits on whitespace tokens and handles --flag=VALUE patterns.
+ */
+export function redactString(value: string): string {
+	return value.replace(/\S+/g, (token) => {
+		const eqIdx = token.indexOf("=");
+		if (eqIdx !== -1) {
+			const afterEq = token.slice(eqIdx + 1);
+			if (isSensitive(afterEq)) {
+				return token.slice(0, eqIdx + 1) + REDACTED;
+			}
+		}
+		return isSensitive(token) ? REDACTED : token;
+	});
+}

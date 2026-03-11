@@ -1,5 +1,5 @@
 import { fork } from "node:child_process";
-import { openSync } from "node:fs";
+import { closeSync, openSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isRunning, writePid } from "../utils/health";
@@ -22,19 +22,25 @@ export function forkDaemon(): { pid: number; logFile: string } | null {
 	const out = openSync(logFile, "a");
 	const err = openSync(logFile, "a");
 
-	const child = fork(daemonPath, [], {
-		detached: true,
-		stdio: ["ignore", out, err, "ipc"],
-	});
+	try {
+		const child = fork(daemonPath, [], {
+			detached: true,
+			stdio: ["ignore", out, err, "ipc"],
+		});
 
-	child.unref();
+		child.unref();
 
-	if (child.pid) {
-		writePid(child.pid);
-		return { pid: child.pid, logFile };
+		if (child.pid) {
+			writePid(child.pid);
+			return { pid: child.pid, logFile };
+		}
+
+		return null;
+	} finally {
+		// Close parent's copies of the FDs; the child inherits its own copies.
+		closeSync(out);
+		closeSync(err);
 	}
-
-	return null;
 }
 
 export async function start(): Promise<void> {

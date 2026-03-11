@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { logger } from "../utils/logger";
+import { redactString } from "../utils/redact";
 import { buildSafeEnv, SIGKILL_DELAY_MS } from "../utils/process";
 import type { AgentCommand } from "../agents/types";
 import type { SpawnResult } from "../utils/process";
@@ -86,7 +87,7 @@ export async function runVerificationCommands(
   commandTimeoutMs?: number,
 ): Promise<VerificationResult> {
   for (const cmd of commands) {
-    logger.info({ cmd, cwd: worktreePath }, "Running verification command");
+    logger.info({ cmd: redactString(cmd), cwd: worktreePath }, "Running verification command");
 
     const result = await execCommand(cmd, worktreePath, env, commandTimeoutMs);
 
@@ -98,7 +99,7 @@ export async function runVerificationCommands(
       };
     }
 
-    logger.info({ cmd }, "Verification command passed");
+    logger.info({ cmd: redactString(cmd) }, "Verification command passed");
   }
 
   return { success: true };

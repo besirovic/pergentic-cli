@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { redactArgs } from "./redact";
+import { redactArgs, redactString } from "./redact";
 
 describe("redactArgs", () => {
 	it("redacts Anthropic API keys (sk-ant-*)", () => {
@@ -58,5 +58,37 @@ describe("redactArgs", () => {
 		const args = ["claude", "--api-key", "sk-ant-api03-secret123", "--cwd", "/tmp/work"];
 		const result = redactArgs(args);
 		expect(result).toEqual(["claude", "--api-key", "***REDACTED***", "--cwd", "/tmp/work"]);
+	});
+});
+
+describe("redactString", () => {
+	it("redacts a bare token in a command string", () => {
+		expect(redactString("run sk-ant-api03-abc123def456")).toBe(
+			"run ***REDACTED***",
+		);
+	});
+
+	it("redacts --flag=TOKEN patterns", () => {
+		expect(redactString("deploy --token=ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789")).toBe(
+			"deploy --token=***REDACTED***",
+		);
+	});
+
+	it("preserves non-sensitive strings", () => {
+		expect(redactString("npm test --bail")).toBe("npm test --bail");
+	});
+
+	it("redacts multiple tokens in one string", () => {
+		expect(
+			redactString("cmd sk-ant-api03-abc123 --key=xoxb-123-456-abc"),
+		).toBe("cmd ***REDACTED*** --key=***REDACTED***");
+	});
+
+	it("handles empty string", () => {
+		expect(redactString("")).toBe("");
+	});
+
+	it("does not redact short sk- that is not a real key", () => {
+		expect(redactString("sk-short")).toBe("sk-short");
 	});
 });

@@ -1,7 +1,52 @@
+import { basename } from "node:path";
 import { spawn, type SpawnOptions } from "node:child_process";
 
 /** Delay between SIGTERM and SIGKILL when killing agent processes. */
 export const SIGKILL_DELAY_MS = 10_000;
+
+const ALLOWED_EDITORS = new Set([
+  "vi",
+  "vim",
+  "nvim",
+  "nano",
+  "emacs",
+  "code",
+  "subl",
+  "mate",
+  "micro",
+  "hx",
+  "helix",
+  "kate",
+  "gedit",
+]);
+
+const SHELL_METACHAR_RE = /[;|&`$(){}[\]<>!#~*?\n\r]/;
+
+/**
+ * Resolve and validate the EDITOR env var, falling back to 'vi' if the value
+ * is missing, not in the allow-list, or contains shell metacharacters.
+ */
+export function resolveEditor(): string {
+  const raw = process.env.EDITOR;
+  if (!raw) return "vi";
+
+  if (SHELL_METACHAR_RE.test(raw)) {
+    console.warn(
+      `[pergentic] EDITOR contains shell metacharacters ("${raw}"), falling back to vi`,
+    );
+    return "vi";
+  }
+
+  const base = basename(raw.trim());
+  if (!ALLOWED_EDITORS.has(base)) {
+    console.warn(
+      `[pergentic] EDITOR "${raw}" is not in the allowed editors list, falling back to vi`,
+    );
+    return "vi";
+  }
+
+  return base;
+}
 
 export interface SpawnResult {
   exitCode: number;

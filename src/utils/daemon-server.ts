@@ -34,7 +34,7 @@ export function createDaemonServer(): {
     if (method === "POST") {
       const route = routes.find((r) => r.method === "POST" && r.path === url);
       if (route) {
-        let body = "";
+        const chunks: Buffer[] = [];
         let bodyBytes = 0;
         let rejected = false;
         req.on("data", (chunk: Buffer) => {
@@ -46,10 +46,10 @@ export function createDaemonServer(): {
             req.resume(); // drain remaining data
             return;
           }
-          body += chunk;
+          chunks.push(chunk);
         });
         req.on("end", () => {
-          if (!rejected) route.handler(body, res);
+          if (!rejected) route.handler(Buffer.concat(chunks).toString("utf-8"), res);
         });
         return;
       }

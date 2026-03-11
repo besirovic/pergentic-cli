@@ -6,6 +6,7 @@ import { select, input } from "@inquirer/prompts";
 import chalk from "chalk";
 import { Cron } from "croner";
 import { error, success } from "../utils/ui";
+import { resolveEditor } from "../utils/process";
 import {
 	loadSchedulesConfig,
 	addScheduleEntry,
@@ -98,7 +99,7 @@ export async function scheduleAdd(projectPath: string): Promise<void> {
 			if (editChoice === "edit") {
 				const { schedulePromptPath } = await import("../config/paths.js");
 				const fullPath = schedulePromptPath(projectPath, relativePath);
-				const editor = process.env.EDITOR || "vi";
+				const editor = resolveEditor();
 				await new Promise<void>((resolve) => {
 					const child = spawn(editor, [fullPath], { stdio: "inherit" });
 					child.on("close", () => resolve());

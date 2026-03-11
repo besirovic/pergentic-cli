@@ -177,6 +177,18 @@ describe("loadSecrets", () => {
     expect(secrets.githubToken).toBe("ghp_456");
     expect(secrets.linearApiKey).toBe("lin_api_789");
   });
+
+  it("maps PERGENTIC_ANTHROPIC_API_KEY env var to anthropicApiKey field", () => {
+    process.env.PERGENTIC_ANTHROPIC_API_KEY = "sk-ant-from-env";
+    const secrets = loadSecrets(TEST_PROJECT);
+    expect(secrets.anthropicApiKey).toBe("sk-ant-from-env");
+  });
+
+  it("maps PERGENTIC_GITHUB_TOKEN env var to githubToken field", () => {
+    process.env.PERGENTIC_GITHUB_TOKEN = "ghp_from-env";
+    const secrets = loadSecrets(TEST_PROJECT);
+    expect(secrets.githubToken).toBe("ghp_from-env");
+  });
 });
 
 describe("saveProjectEnv", () => {

@@ -103,18 +103,17 @@ export function loadSecrets(projectPath: string): ResolvedSecrets {
   // 2. Project .env (overrides global)
   const projectEnv = parseEnvFile(projectEnvPath(projectPath));
 
-  // 3. Merge: global < project < process.env
-  const merged = { ...globalEnv, ...projectEnv };
-  for (const envVar of Object.values(SECRET_FIELDS)) {
-    if (process.env[envVar]) {
-      merged[envVar] = process.env[envVar];
-    }
+  // 3. Merge: global < project < process.env, keyed by field name
+  const merged: Record<string, string | undefined> = {};
+  for (const [fieldName, envVarName] of Object.entries(SECRET_FIELDS)) {
+    merged[fieldName] =
+      process.env[envVarName] ?? projectEnv[envVarName] ?? globalEnv[envVarName];
   }
 
-  // 4. Map env var names to config field names, validating values
+  // 4. Validate values and build secrets object
   const secrets: ResolvedSecrets = {};
   for (const [field, envVar] of Object.entries(SECRET_FIELDS)) {
-    const raw = merged[envVar];
+    const raw = merged[field];
     if (raw == null) continue;
 
     const value = raw.trim();

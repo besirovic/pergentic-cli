@@ -251,15 +251,22 @@ export async function postTaskComments(ctx: CommentContext): Promise<void> {
   });
 
   const { projectConfig } = ctx;
-  const githubToken = projectConfig.githubToken ?? "";
+  const githubToken = projectConfig.githubToken;
 
-  // Always post on the PR, and dispatch to source provider concurrently
-  await Promise.allSettled([
-    replyToPRComment(ctx.repo, ctx.prNumber, body, githubToken).catch(
-      (err) => {
-        logger.error({ err }, "Failed to post PR comment");
-      },
-    ),
+  // Post on the PR (if token available) and dispatch to source provider concurrently
+  const promises: Promise<void>[] = [
     dispatchCommentToProviders(body, ctx.task, projectConfig, ctx.repo, "issue"),
-  ]);
+  ];
+
+  if (githubToken) {
+    promises.push(
+      replyToPRComment(ctx.repo, ctx.prNumber, body, githubToken).catch(
+        (err) => {
+          logger.error({ err }, "Failed to post PR comment");
+        },
+      ),
+    );
+  }
+
+  await Promise.allSettled(promises);
 }
