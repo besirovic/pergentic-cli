@@ -107,12 +107,26 @@ export async function runVerificationCommands(
 
 const VERIFICATION_OUTPUT_TRUNCATE_CHARS = 3000;
 
+/** Truncate from the end, respecting grapheme cluster boundaries to avoid splitting emoji/surrogate pairs. */
+function truncateEndGraphemeSafe(str: string, maxGraphemes: number): { truncated: boolean; result: string } {
+  const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  const segments = [...segmenter.segment(str)];
+  if (segments.length <= maxGraphemes) {
+    return { truncated: false, result: str };
+  }
+  return {
+    truncated: true,
+    result: segments.slice(-maxGraphemes).map((s) => s.segment).join(""),
+  };
+}
+
 export function buildVerificationFixPrompt(
   failedCommand: string,
   output: string,
   attempt: number,
   maxAttempts: number,
 ): string {
+  const { truncated, result: displayOutput } = truncateEndGraphemeSafe(output, VERIFICATION_OUTPUT_TRUNCATE_CHARS);
   return [
     "A verification command failed. Please fix the issue.",
     "",
@@ -121,7 +135,7 @@ export function buildVerificationFixPrompt(
     "",
     "**Error output:**",
     "```",
-    output.length > VERIFICATION_OUTPUT_TRUNCATE_CHARS ? `[Output truncated to last ${VERIFICATION_OUTPUT_TRUNCATE_CHARS} chars]\n${output.slice(-VERIFICATION_OUTPUT_TRUNCATE_CHARS)}` : output,
+    truncated ? `[Output truncated to last ${VERIFICATION_OUTPUT_TRUNCATE_CHARS} chars]\n${displayOutput}` : displayOutput,
     "```",
     "",
     "Fix the code so this command passes. Do not modify the verification command itself.",
