@@ -29,6 +29,7 @@ export class SlackProvider implements TaskProvider {
 	private ws: WebSocket | null = null;
 	private connectionState: ConnectionState = "disconnected";
 	private connectionId = 0;
+	private connectPromise: Promise<void> | null = null;
 	private pendingTasks: IncomingTask[] = [];
 	private channelProjectMap: Record<string, string>;
 
@@ -43,6 +44,20 @@ export class SlackProvider implements TaskProvider {
 	}
 
 	async connect(): Promise<void> {
+		// Deduplicate concurrent connect() calls — return the in-flight promise
+		if (this.connectPromise) {
+			return this.connectPromise;
+		}
+
+		this.connectPromise = this.doConnect();
+		try {
+			await this.connectPromise;
+		} finally {
+			this.connectPromise = null;
+		}
+	}
+
+	private async doConnect(): Promise<void> {
 		this.connectionState = "connecting";
 		this.connectionId++;
 		const currentConnectionId = this.connectionId;
@@ -158,7 +173,7 @@ export class SlackProvider implements TaskProvider {
 			}
 		}
 
-		const tasks = [...this.pendingTasks];
+		const tasks = this.pendingTasks;
 		this.pendingTasks = [];
 		return tasks;
 	}
@@ -182,5 +197,6 @@ export class SlackProvider implements TaskProvider {
 		}
 		this.connectionState = "disconnected";
 		this.connectionId = 0;
+		this.connectPromise = null;
 	}
 }
