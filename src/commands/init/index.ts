@@ -33,26 +33,31 @@ import {
 	maybeImportLegacyKeys,
 } from "./wizard-steps-advanced";
 
-function detectGitRemote(projectPath: string): string | undefined {
+function detectGitRemote(projectPath: string): { value: string | undefined; failed: boolean } {
 	try {
-		return execSync("git remote get-url origin", {
-			cwd: projectPath,
-			encoding: "utf-8",
-		}).trim();
-	} catch {
-		return undefined;
-	}
-}
-
-function detectGitBranch(projectPath: string): string {
-	try {
-		return execSync("git symbolic-ref --short HEAD", {
+		const value = execSync("git remote get-url origin", {
 			cwd: projectPath,
 			encoding: "utf-8",
 			stdio: ["ignore", "pipe", "ignore"],
 		}).trim();
-	} catch {
-		return "main";
+		return { value, failed: false };
+	} catch (err) {
+		console.debug("[pergentic] git remote detection failed:", err);
+		return { value: undefined, failed: true };
+	}
+}
+
+function detectGitBranch(projectPath: string): { value: string; failed: boolean } {
+	try {
+		const value = execSync("git symbolic-ref --short HEAD", {
+			cwd: projectPath,
+			encoding: "utf-8",
+			stdio: ["ignore", "pipe", "ignore"],
+		}).trim();
+		return { value, failed: false };
+	} catch (err) {
+		console.debug("[pergentic] git branch detection failed:", err);
+		return { value: "main", failed: true };
 	}
 }
 
@@ -69,8 +74,9 @@ export async function init(projectPath?: string): Promise<void> {
 		return;
 	}
 
-	const detectedRepo = detectGitRemote(absPath);
-	const detectedBranch = detectGitBranch(absPath);
+	const { value: detectedRepo, failed: remoteFailed } = detectGitRemote(absPath);
+	const { value: detectedBranch, failed: branchFailed } = detectGitBranch(absPath);
+	const gitDetectionFailed = remoteFailed || branchFailed;
 
 	const configFile = projectConfigPath(absPath);
 	let config: ProjectConfig;
@@ -112,6 +118,12 @@ export async function init(projectPath?: string): Promise<void> {
 		clearScreen();
 		printHeader();
 		console.log(chalk.dim(`  Project: ${absPath}\n`));
+
+		if (gitDetectionFailed) {
+			console.log(
+				chalk.yellow(`  ⚠ Git detection failed — defaults applied. Run with DEBUG=* for details.\n`)
+			);
+		}
 
 		if (hasExisting) {
 			console.log(
