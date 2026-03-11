@@ -133,13 +133,7 @@ async function dispatchCommentToProviders(
     const linearId = payload.metadata.linearId;
     if (typeof linearId === "string") {
       promises.push(
-        postLinearComment(
-          linearId,
-          body,
-          projectConfig.linearApiKey,
-        ).catch((err) => {
-          logger.error({ err }, `Failed to post Linear ${logPrefix} comment`);
-        }),
+        postLinearComment(linearId, body, projectConfig.linearApiKey),
       );
     }
   }
@@ -153,14 +147,7 @@ async function dispatchCommentToProviders(
     const issueNumber = payload.metadata.issueNumber;
     if (typeof issueNumber === "number") {
       promises.push(
-        replyToPRComment(
-          repo,
-          issueNumber,
-          body,
-          projectConfig.githubToken,
-        ).catch((err) => {
-          logger.error({ err }, `Failed to post GitHub ${logPrefix} comment`);
-        }),
+        replyToPRComment(repo, issueNumber, body, projectConfig.githubToken),
       );
     }
   }
@@ -182,14 +169,17 @@ async function dispatchCommentToProviders(
           projectConfig.jiraDomain,
           projectConfig.jiraEmail,
           projectConfig.jiraApiToken,
-        ).catch((err) => {
-          logger.error({ err }, `Failed to post Jira ${logPrefix} comment`);
-        }),
+        ),
       );
     }
   }
 
-  await Promise.allSettled(promises);
+  const results = await Promise.allSettled(promises);
+  for (const result of results) {
+    if (result.status === "rejected") {
+      logger.error({ err: result.reason }, `Failed to post ${logPrefix} comment`);
+    }
+  }
 }
 
 export interface VerificationFailureContext {
@@ -260,13 +250,14 @@ export async function postTaskComments(ctx: CommentContext): Promise<void> {
 
   if (githubToken) {
     promises.push(
-      replyToPRComment(ctx.repo, ctx.prNumber, body, githubToken).catch(
-        (err) => {
-          logger.error({ err }, "Failed to post PR comment");
-        },
-      ),
+      replyToPRComment(ctx.repo, ctx.prNumber, body, githubToken),
     );
   }
 
-  await Promise.allSettled(promises);
+  const results = await Promise.allSettled(promises);
+  for (const result of results) {
+    if (result.status === "rejected") {
+      logger.error({ err: result.reason }, "Failed to post comment");
+    }
+  }
 }
