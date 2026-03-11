@@ -55,22 +55,25 @@ export async function dashboard(): Promise<void> {
 	const maxFailures = 3;
 
 	await new Promise<void>((resolve) => {
-		const interval = setInterval(() => {
+		let interval: ReturnType<typeof setInterval>;
+
+		const cleanup = () => {
+			clearInterval(interval);
+			process.removeListener("SIGINT", cleanup);
+			resolve();
+		};
+
+		interval = setInterval(() => {
 			if (render()) {
 				consecutiveFailures = 0;
 			} else {
 				consecutiveFailures++;
 				if (consecutiveFailures >= maxFailures) {
-					clearInterval(interval);
-					resolve();
+					cleanup();
 				}
 			}
 		}, TIMEOUTS.DASHBOARD_REFRESH_MS);
 
-		const cleanup = () => {
-			clearInterval(interval);
-			resolve();
-		};
 		process.once("SIGINT", cleanup);
 	});
 }
