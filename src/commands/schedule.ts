@@ -97,24 +97,31 @@ export async function scheduleAdd(projectPath: string): Promise<void> {
 			});
 
 			if (editChoice === "edit") {
-				const { schedulePromptPath } = await import("../config/paths.js");
-				const fullPath = schedulePromptPath(projectPath, relativePath);
-				const editor = resolveEditor();
-				await new Promise<void>((resolve, reject) => {
-					const child = spawn(editor, [fullPath], { stdio: "inherit" });
-					const onSigint = () => {
-						child.kill("SIGTERM");
-					};
-					process.on("SIGINT", onSigint);
-					child.on("close", (code) => {
-						process.removeListener("SIGINT", onSigint);
-						resolve();
+				if (!process.stdin.isTTY) {
+					error("Cannot open editor: stdin is not an interactive terminal");
+					const { schedulePromptPath } = await import("../config/paths.js");
+					const fullPath = schedulePromptPath(projectPath, relativePath);
+					console.log(chalk.dim(`\n  Edit prompt at: ${fullPath}\n`));
+				} else {
+					const { schedulePromptPath } = await import("../config/paths.js");
+					const fullPath = schedulePromptPath(projectPath, relativePath);
+					const editor = resolveEditor();
+					await new Promise<void>((resolve, reject) => {
+						const child = spawn(editor, [fullPath], { stdio: "inherit" });
+						const onSigint = () => {
+							child.kill("SIGTERM");
+						};
+						process.on("SIGINT", onSigint);
+						child.on("close", (code) => {
+							process.removeListener("SIGINT", onSigint);
+							resolve();
+						});
+						child.on("error", (err) => {
+							process.removeListener("SIGINT", onSigint);
+							reject(err);
+						});
 					});
-					child.on("error", (err) => {
-						process.removeListener("SIGINT", onSigint);
-						reject(err);
-					});
-				});
+				}
 			} else {
 				const { schedulePromptPath } = await import("../config/paths.js");
 				const fullPath = schedulePromptPath(projectPath, relativePath);
