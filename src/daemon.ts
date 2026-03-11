@@ -160,8 +160,22 @@ async function main(): Promise<void> {
 		const statePath = stateFilePath();
 		if (existsSync(statePath)) {
 			readFile(statePath, "utf-8").then(
-				(data) => res.end(data),
-				() => res.end(JSON.stringify({ status: "starting" })),
+				(data) => {
+					try {
+						if (!res.headersSent) res.end(data);
+					} catch (e) {
+						logger.error({ err: e }, "Failed to write /status response");
+					}
+				},
+				(err) => {
+					logger.error({ err }, "Failed to read state file for /status");
+					try {
+						if (!res.headersSent)
+							res.end(JSON.stringify({ status: "starting" }));
+					} catch (e) {
+						logger.error({ err: e }, "Failed to write /status error response");
+					}
+				},
 			);
 		} else {
 			res.end(JSON.stringify({ status: "starting" }));
