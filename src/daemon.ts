@@ -177,9 +177,15 @@ async function main(): Promise<void> {
 						logger.error({ err: e }, "Failed to write /status error response");
 					}
 				},
-			);
+			).catch((e) => {
+				logger.error({ err: e }, "Unhandled error in /status handler");
+			});
 		} else {
-			res.end(JSON.stringify({ status: "starting" }));
+			try {
+				res.end(JSON.stringify({ status: "starting" }));
+			} catch (e) {
+				logger.error({ err: e }, "Failed to write /status fallback response");
+			}
 		}
 	});
 
