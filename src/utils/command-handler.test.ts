@@ -41,4 +41,32 @@ describe("handleCommand", () => {
 		expect(exitSpy).toHaveBeenCalledWith(0);
 		exitSpy.mockRestore();
 	});
+
+	it("shows rebuild guidance for ERR_MODULE_NOT_FOUND errors", async () => {
+		const { error: errorMock } = await import("./ui");
+		const err = Object.assign(new Error("Cannot find module './commands/init/index.js'"), {
+			code: "ERR_MODULE_NOT_FOUND",
+		});
+
+		const fn = handleCommand(async () => {
+			throw err;
+		});
+		await fn();
+		expect(process.exitCode).toBe(1);
+		expect(errorMock).toHaveBeenCalledWith("Command module not found. Try rebuilding: yarn build");
+	});
+
+	it("shows rebuild guidance for MODULE_NOT_FOUND errors", async () => {
+		const { error: errorMock } = await import("./ui");
+		const err = Object.assign(new Error("Cannot find module './commands/add.js'"), {
+			code: "MODULE_NOT_FOUND",
+		});
+
+		const fn = handleCommand(async () => {
+			throw err;
+		});
+		await fn();
+		expect(process.exitCode).toBe(1);
+		expect(errorMock).toHaveBeenCalledWith("Command module not found. Try rebuilding: yarn build");
+	});
 });
