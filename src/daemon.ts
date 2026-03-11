@@ -209,20 +209,41 @@ async function main(): Promise<void> {
 		shuttingDown = true;
 		logger.info("Shutting down gracefully...");
 
-		poller.stop();
-		clearInterval(stateInterval);
+		try {
+			poller.stop();
+			clearInterval(stateInterval);
 
-		await runner.waitForAll(DAEMON.SHUTDOWN_TIMEOUT_MS);
+			await runner.waitForAll(DAEMON.SHUTDOWN_TIMEOUT_MS);
 
-		server.close();
-		updateState(runner, queue);
-		releaseLock();
-		logger.info("Daemon stopped");
-		process.exit(0);
+			// Close HTTP server with a 5-second timeout
+			await Promise.race([
+				new Promise<void>((resolve) => server.close(() => resolve())),
+				new Promise<void>((resolve) => {
+					setTimeout(() => {
+						logger.warn("server.close() timed out, forcing connections closed");
+						if (typeof server.closeAllConnections === "function") {
+							server.closeAllConnections();
+						}
+						resolve();
+					}, 5000);
+				}),
+			]);
+
+			updateState(runner, queue);
+		} finally {
+			releaseLock();
+			logger.info("Daemon stopped");
+			process.exit(0);
+		}
 	};
 
 	process.on("SIGTERM", shutdown);
 	process.on("SIGINT", shutdown);
+
+	// Last-resort lock cleanup on unexpected exit
+	process.on("exit", () => {
+		releaseLock();
+	});
 
 	// Start polling
 	await poller.start();
@@ -285,6 +306,6 @@ async function loadTodayStats(): Promise<{
 
 main().catch((err) => {
 	logger.fatal({ err }, "Daemon crashed");
-	releaseLock();
+	// releaseLock() is handled by the process 'exit' handler
 	process.exit(1);
 });
