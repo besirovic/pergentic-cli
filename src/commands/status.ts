@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
 import { isRunning, readPid } from "../utils/health";
 import { error } from "../utils/ui";
@@ -24,6 +24,42 @@ function formatUptime(seconds: number): string {
 	const m = Math.floor((seconds % 3600) / 60);
 	if (h > 0) return `${h}h ${m}m`;
 	return `${m}m`;
+}
+
+const KILL_TIMEOUT_MS = 3_000;
+
+function killTunnel(tunnel: ChildProcess): Promise<void> {
+	return new Promise((resolve) => {
+		if (tunnel.exitCode !== null || tunnel.killed) {
+			resolve();
+			return;
+		}
+
+		const onExit = () => {
+			clearTimeout(timer);
+			resolve();
+		};
+
+		tunnel.once("exit", onExit);
+
+		try {
+			tunnel.kill("SIGTERM");
+		} catch {
+			tunnel.removeListener("exit", onExit);
+			resolve();
+			return;
+		}
+
+		const timer = setTimeout(() => {
+			tunnel.removeListener("exit", onExit);
+			try {
+				tunnel.kill("SIGKILL");
+			} catch {
+				// Process already gone
+			}
+			resolve();
+		}, KILL_TIMEOUT_MS);
+	});
 }
 
 async function fetchRemoteStatus(remoteName: string): Promise<void> {
@@ -65,7 +101,7 @@ async function fetchRemoteStatus(remoteName: string): Promise<void> {
 	} catch {
 		error(`Failed to connect to remote "${remoteName}".`);
 	} finally {
-		tunnel.kill();
+		await killTunnel(tunnel);
 	}
 }
 
