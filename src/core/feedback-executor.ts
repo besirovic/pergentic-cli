@@ -1,6 +1,7 @@
 import type { TaskExecutor, ExecutorContext, ExecutorResult } from "./executor-types";
 import type { AgentSpawner, GitService, FeedbackService } from "./runner-deps";
 import type { FeedbackTask } from "./queue";
+import { isFeedbackTask } from "./queue";
 import { runAgentWithRetry } from "./agent-runner";
 import { logger } from "../utils/logger";
 import { redactArgs } from "../utils/redact";
@@ -18,7 +19,10 @@ export class FeedbackExecutor implements TaskExecutor {
   constructor(private deps: FeedbackExecutorDeps) {}
 
   async execute(ctx: ExecutorContext): Promise<ExecutorResult> {
-    const task = ctx.task as FeedbackTask;
+    if (!isFeedbackTask(ctx.task)) {
+      throw new Error(`FeedbackExecutor received wrong task type "${ctx.task.type}" (expected "feedback") for task ${ctx.task.id}`);
+    }
+    const task = ctx.task;
 
     await this.deps.git.pullBranch(ctx.worktree.path, ctx.worktree.branch);
 

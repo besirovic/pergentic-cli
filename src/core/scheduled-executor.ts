@@ -1,6 +1,7 @@
 import type { TaskExecutor, ExecutorContext, ExecutorResult } from "./executor-types";
 import type { AgentSpawner, ScheduledCommandService, VerificationService, PRService } from "./runner-deps";
 import type { ScheduledTask } from "./queue";
+import { isScheduledTask } from "./queue";
 import { runAgentWithRetry } from "./agent-runner";
 import { logger } from "../utils/logger";
 import { redactArgs } from "../utils/redact";
@@ -19,7 +20,10 @@ export class ScheduledExecutor implements TaskExecutor {
   constructor(private deps: ScheduledExecutorDeps) {}
 
   async execute(ctx: ExecutorContext): Promise<ExecutorResult> {
-    const task = ctx.task as ScheduledTask;
+    if (!isScheduledTask(ctx.task)) {
+      throw new Error(`ScheduledExecutor received wrong task type "${ctx.task.type}" (expected "scheduled") for task ${ctx.task.id}`);
+    }
+    const task = ctx.task;
 
     // Command-type: delegate to ScheduledCommandRunner (handles its own lifecycle)
     if (task.payload.scheduledCommand) {
