@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { DispatchLedger } from "./ledger";
 
@@ -13,6 +13,73 @@ function makeEntry(id: string, daysAgo: number): string {
   const ts = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString();
   return JSON.stringify({ id, type: "task", timestamp: ts });
 }
+
+describe("DispatchLedger.load", () => {
+  beforeEach(() => {
+    process.env.PERGENTIC_HOME = TEST_HOME;
+    if (existsSync(TEST_HOME)) rmSync(TEST_HOME, { recursive: true });
+    mkdirSync(TEST_HOME, { recursive: true });
+  });
+
+  afterEach(() => {
+    delete process.env.PERGENTIC_HOME;
+    if (existsSync(TEST_HOME)) rmSync(TEST_HOME, { recursive: true });
+    vi.restoreAllMocks();
+  });
+
+  it("loads valid entries into dispatched set", async () => {
+    const lines = [makeEntry("task-1", 1), makeEntry("task-2", 2)];
+    writeFileSync(ledgerPath(), lines.join("\n") + "\n");
+
+    const ledger = new DispatchLedger();
+    await ledger.load();
+
+    expect(ledger.isDispatched("task-1")).toBe(true);
+    expect(ledger.isDispatched("task-2")).toBe(true);
+  });
+
+  it("creates a backup when corruption threshold is exceeded", async () => {
+    const corruptLines = Array.from({ length: 5 }, (_, i) => `not-json-${i}`);
+    writeFileSync(ledgerPath(), corruptLines.join("\n") + "\n");
+
+    const ledger = new DispatchLedger();
+    await ledger.load();
+
+    const files = readdirSync(TEST_HOME);
+    const backups = files.filter((f) => f.includes(".corrupt.") && f.endsWith(".bak"));
+    expect(backups).toHaveLength(1);
+  });
+
+  it("does not create a backup when few entries are skipped", async () => {
+    const lines = [
+      makeEntry("task-1", 1),
+      "bad-line",
+      makeEntry("task-2", 2),
+    ];
+    writeFileSync(ledgerPath(), lines.join("\n") + "\n");
+
+    const ledger = new DispatchLedger();
+    await ledger.load();
+
+    const files = readdirSync(TEST_HOME);
+    const backups = files.filter((f) => f.includes(".corrupt.") && f.endsWith(".bak"));
+    expect(backups).toHaveLength(0);
+    expect(ledger.isDispatched("task-1")).toBe(true);
+    expect(ledger.isDispatched("task-2")).toBe(true);
+  });
+
+  it("still loads valid entries even when corruption threshold is exceeded", async () => {
+    const goodLines = [makeEntry("good-1", 1), makeEntry("good-2", 2)];
+    const corruptLines = Array.from({ length: 5 }, (_, i) => `not-json-${i}`);
+    writeFileSync(ledgerPath(), [...goodLines, ...corruptLines].join("\n") + "\n");
+
+    const ledger = new DispatchLedger();
+    await ledger.load();
+
+    expect(ledger.isDispatched("good-1")).toBe(true);
+    expect(ledger.isDispatched("good-2")).toBe(true);
+  });
+});
 
 describe("DispatchLedger.prune", () => {
   beforeEach(() => {

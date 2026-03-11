@@ -9,6 +9,7 @@ import { logger } from "../utils/logger";
 import { safeAppendFileAsync } from "../utils/fs";
 
 const DEFAULT_LEDGER_RETENTION_DAYS = 30;
+const CORRUPTION_THRESHOLD = 5; // entries skipped before treating as corruption
 
 interface LedgerEntry {
   id: string;
@@ -33,6 +34,7 @@ export class DispatchLedger {
       const content = await readFile(this.filePath, "utf-8");
       const lines = content.split("\n");
       let skippedCount = 0;
+      const totalNonEmpty = lines.filter((l) => l.trim()).length;
       for (let i = 0; i < lines.length; i++) {
         const trimmed = lines[i].trim();
         if (!trimmed) continue;
@@ -44,6 +46,37 @@ export class DispatchLedger {
           logger.warn({ err, line: trimmed, lineNumber: i + 1 }, "Skipping malformed ledger entry");
         }
       }
+
+      if (skippedCount >= CORRUPTION_THRESHOLD) {
+        const corruptionRatio = totalNonEmpty > 0 ? skippedCount / totalNonEmpty : 1;
+        const backupPath = `${this.filePath}.corrupt.${Date.now()}.bak`;
+        try {
+          await copyFile(this.filePath, backupPath);
+          logger.error(
+            {
+              skipped: skippedCount,
+              total: totalNonEmpty,
+              corruptionRatio: corruptionRatio.toFixed(2),
+              backupPath,
+            },
+            "Ledger corruption detected: many entries were skipped. " +
+            "A backup of the corrupted file has been created. " +
+            "Previously dispatched task IDs may have been lost, which could cause task duplication. " +
+            "Review the backup file to identify missing entries.",
+          );
+        } catch (backupErr) {
+          logger.error(
+            {
+              err: backupErr,
+              skipped: skippedCount,
+              total: totalNonEmpty,
+            },
+            "Ledger corruption detected but failed to create backup. " +
+            "Task duplication may occur due to lost deduplication keys.",
+          );
+        }
+      }
+
       logger.info(
         { count: this.dispatched.size, skipped: skippedCount },
         "Loaded dispatch ledger",
