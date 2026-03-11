@@ -19,6 +19,7 @@ import {
 import { loadProjectConfig } from "../config/loader";
 import type { ScheduleEntry } from "../config/schema";
 import { promptTheme, isExitPromptError } from "../utils/prompt-helpers";
+import { schedulePromptPath } from "../config/paths";
 
 const CRON_PRESETS = [
 	{ name: "Every 15 minutes", value: "*/15 * * * *" },
@@ -99,11 +100,9 @@ export async function scheduleAdd(projectPath: string): Promise<void> {
 			if (editChoice === "edit") {
 				if (!process.stdin.isTTY) {
 					error("Cannot open editor: stdin is not an interactive terminal");
-					const { schedulePromptPath } = await import("../config/paths.js");
 					const fullPath = schedulePromptPath(projectPath, relativePath);
 					console.log(chalk.dim(`\n  Edit prompt at: ${fullPath}\n`));
 				} else {
-					const { schedulePromptPath } = await import("../config/paths.js");
 					const fullPath = schedulePromptPath(projectPath, relativePath);
 					const editor = resolveEditor();
 					await new Promise<void>((resolve, reject) => {
@@ -123,7 +122,6 @@ export async function scheduleAdd(projectPath: string): Promise<void> {
 					});
 				}
 			} else {
-				const { schedulePromptPath } = await import("../config/paths.js");
 				const fullPath = schedulePromptPath(projectPath, relativePath);
 				console.log(chalk.dim(`\n  Edit prompt at: ${fullPath}\n`));
 			}
