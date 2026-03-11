@@ -225,6 +225,23 @@ async function main(): Promise<void> {
 		}
 	});
 
+	server.on("error", (err: NodeJS.ErrnoException) => {
+		if (err.code === "EADDRINUSE") {
+			logger.error(
+				{ port: config.statusPort },
+				`Port ${config.statusPort} is already in use. Is another daemon instance running?`,
+			);
+		} else if (err.code === "EACCES") {
+			logger.error(
+				{ port: config.statusPort },
+				`Permission denied binding to port ${config.statusPort}.`,
+			);
+		} else {
+			logger.error({ err }, "Status server failed to start");
+		}
+		shutdown();
+	});
+
 	server.listen(config.statusPort, "127.0.0.1", () => {
 		logger.info({ port: config.statusPort }, "Status endpoint listening");
 	});
