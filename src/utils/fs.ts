@@ -1,13 +1,16 @@
+import { randomBytes } from "node:crypto";
 import { readFileSync, existsSync, openSync, writeSync, fsyncSync, closeSync, renameSync } from "node:fs";
 import { readFile, rename, open } from "node:fs/promises";
 import type { z } from "zod";
 import { FILE_MODES } from "../config/constants";
 import { logger } from "./logger";
 
-let writeCounter = 0;
+function uniqueTmpPath(filePath: string): string {
+  return `${filePath}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
+}
 
 export function atomicWriteFile(filePath: string, data: string, mode = FILE_MODES.SECURE): void {
-  const tmpPath = `${filePath}.${process.pid}.${writeCounter++}.tmp`;
+  const tmpPath = uniqueTmpPath(filePath);
   const fd = openSync(tmpPath, "w", mode);
   try {
     writeSync(fd, data, 0, "utf-8");
@@ -19,7 +22,7 @@ export function atomicWriteFile(filePath: string, data: string, mode = FILE_MODE
 }
 
 export async function atomicWriteFileAsync(filePath: string, data: string, mode = FILE_MODES.SECURE): Promise<void> {
-  const tmpPath = `${filePath}.${process.pid}.${writeCounter++}.tmp`;
+  const tmpPath = uniqueTmpPath(filePath);
   const fh = await open(tmpPath, "w", mode);
   try {
     await fh.write(data, 0, "utf-8");
