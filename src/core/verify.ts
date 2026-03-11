@@ -43,6 +43,16 @@ export function execCommand(
     let termTimer: ReturnType<typeof setTimeout> | undefined;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
 
+    // Kill child if the parent process exits normally so it isn't orphaned.
+    const killChild = () => { try { child.kill("SIGKILL"); } catch { /* already dead */ } };
+    process.on("exit", killChild);
+
+    function cleanup() {
+      if (termTimer) clearTimeout(termTimer);
+      if (killTimer) clearTimeout(killTimer);
+      process.off("exit", killChild);
+    }
+
     if (timeoutMs) {
       termTimer = setTimeout(() => {
         timedOut = true;
@@ -57,20 +67,24 @@ export function execCommand(
     child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
     child.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk));
 
-    child.on("close", (code) => {
-      if (termTimer) clearTimeout(termTimer);
-      if (killTimer) clearTimeout(killTimer);
+    child.on("close", (code, signal) => {
+      cleanup();
       const output = Buffer.concat(chunks).toString("utf-8").trim();
+      // code is null when the process was killed by a signal.
+      const killedBySignal = !timedOut && code === null && signal != null;
       resolve({
         success: !timedOut && code === 0,
-        output: timedOut ? `Command timed out after ${Math.floor((timeoutMs ?? 0) / 1000)}s\n${output}` : output,
+        output: timedOut
+          ? `Command timed out after ${Math.floor((timeoutMs ?? 0) / 1000)}s\n${output}`.trim()
+          : killedBySignal
+          ? `Process killed by signal ${signal}\n${output}`.trim()
+          : output,
         timedOut,
       });
     });
 
     child.on("error", (err) => {
-      if (termTimer) clearTimeout(termTimer);
-      if (killTimer) clearTimeout(killTimer);
+      cleanup();
       resolve({
         success: false,
         output: err.message,
@@ -191,6 +205,16 @@ export function spawnAgentAndWait(
   let termTimer: ReturnType<typeof setTimeout> | undefined;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
 
+  // Kill child if the parent process exits normally so it isn't orphaned.
+  const killChild = () => { try { child.kill("SIGKILL"); } catch { /* already dead */ } };
+  process.on("exit", killChild);
+
+  function cleanup() {
+    if (termTimer) clearTimeout(termTimer);
+    if (killTimer) clearTimeout(killTimer);
+    process.off("exit", killChild);
+  }
+
   if (timeoutMs) {
     termTimer = setTimeout(() => {
       timedOut = true;
@@ -204,8 +228,7 @@ export function spawnAgentAndWait(
 
   const result = new Promise<SpawnResult>((resolve) => {
     child.on("close", (code) => {
-      if (termTimer) clearTimeout(termTimer);
-      if (killTimer) clearTimeout(killTimer);
+      cleanup();
       const stdout = stdoutBuf.toString("utf-8").trim();
       const stderr = stderrBuf.toString("utf-8").trim();
       if (timedOut) {
@@ -224,8 +247,7 @@ export function spawnAgentAndWait(
     });
 
     child.on("error", (err) => {
-      if (termTimer) clearTimeout(termTimer);
-      if (killTimer) clearTimeout(killTimer);
+      cleanup();
       resolve({
         exitCode: 1,
         stdout: "",

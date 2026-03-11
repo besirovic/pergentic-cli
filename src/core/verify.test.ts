@@ -61,6 +61,14 @@ describe("execCommand", () => {
 		expect(result.success).toBe(false);
 		expect(result.output).toContain("timed out");
 	}, 10_000);
+
+	it("resolves when child is killed by external signal", async () => {
+		// 'kill -9 $$' causes the sh process to send SIGKILL to itself.
+		// The promise must resolve (not hang) and report failure.
+		const result = await execCommand("kill -9 $$", "/tmp", {});
+		expect(result.success).toBe(false);
+		expect(result.timedOut).toBe(false);
+	}, 5_000);
 });
 
 describe("spawnAgentAndWait output buffering", () => {
