@@ -89,9 +89,17 @@ function validateSecretFormat(
 ): boolean {
   const rule = KEY_PREFIX_RULES[field];
   if (rule && !value.startsWith(rule.prefix)) {
-    logger.warn(
-      `${rule.label} does not start with expected prefix "${rule.prefix}" — it may be invalid`,
+    if (process.env.PERGENTIC_SKIP_SECRET_VALIDATION === "1") {
+      logger.warn(
+        `${rule.label} does not start with expected prefix "${rule.prefix}" — accepting due to PERGENTIC_SKIP_SECRET_VALIDATION=1`,
+      );
+      return true;
+    }
+    const actualPrefix = value.slice(0, rule.prefix.length) || "(empty)";
+    logger.error(
+      `Invalid ${field}: expected prefix "${rule.prefix}", got "${actualPrefix}". Skipping.`,
     );
+    return false;
   }
   return true;
 }
@@ -124,7 +132,9 @@ export function loadSecrets(projectPath: string): ResolvedSecrets {
       continue;
     }
 
-    validateSecretFormat(field as keyof ResolvedSecrets, value);
+    if (!validateSecretFormat(field as keyof ResolvedSecrets, value)) {
+      continue;
+    }
     (secrets as Record<string, string>)[field] = value;
   }
 

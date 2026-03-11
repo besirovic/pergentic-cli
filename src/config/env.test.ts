@@ -189,6 +189,35 @@ describe("loadSecrets", () => {
     const secrets = loadSecrets(TEST_PROJECT);
     expect(secrets.githubToken).toBe("ghp_from-env");
   });
+
+  it("accepts secret with correct prefix (sk-ant- for anthropicApiKey)", () => {
+    writeFileSync(
+      join(TEST_PROJECT, ".pergentic", ".env"),
+      "PERGENTIC_ANTHROPIC_API_KEY=sk-ant-valid-key-123\n",
+    );
+    const secrets = loadSecrets(TEST_PROJECT);
+    expect(secrets.anthropicApiKey).toBe("sk-ant-valid-key-123");
+  });
+
+  it("rejects secret with wrong prefix (ghp_ for anthropicApiKey)", () => {
+    writeFileSync(
+      join(TEST_PROJECT, ".pergentic", ".env"),
+      "PERGENTIC_ANTHROPIC_API_KEY=ghp_wrong-prefix\n",
+    );
+    const secrets = loadSecrets(TEST_PROJECT);
+    expect(secrets.anthropicApiKey).toBeUndefined();
+  });
+
+  it("allows invalid prefix through when PERGENTIC_SKIP_SECRET_VALIDATION=1", () => {
+    process.env.PERGENTIC_SKIP_SECRET_VALIDATION = "1";
+    writeFileSync(
+      join(TEST_PROJECT, ".pergentic", ".env"),
+      "PERGENTIC_ANTHROPIC_API_KEY=ghp_wrong-but-forced\n",
+    );
+    const secrets = loadSecrets(TEST_PROJECT);
+    expect(secrets.anthropicApiKey).toBe("ghp_wrong-but-forced");
+    delete process.env.PERGENTIC_SKIP_SECRET_VALIDATION;
+  });
 });
 
 describe("saveProjectEnv", () => {
