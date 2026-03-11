@@ -1,6 +1,7 @@
 import { existsSync, createReadStream, createWriteStream } from "node:fs";
 import { readFile, rename, unlink, copyFile } from "node:fs/promises";
-import { createInterface } from "node:readline";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { dispatchedLedgerPath } from "../config/paths";
 import { ensureGlobalConfigDir } from "../config/loader";
 import { logger } from "../utils/logger";
@@ -82,53 +83,62 @@ export class DispatchLedger {
     let retainedCount = 0;
     let skippedCount = 0;
 
-    try {
-      await copyFile(this.filePath, bakPath);
+    // Create backup before any write attempt; preserved on error per acceptance criteria
+    await copyFile(this.filePath, bakPath);
 
-      const readStream = createReadStream(this.filePath, { encoding: "utf-8" });
-      const writeStream = createWriteStream(tmpPath, { encoding: "utf-8" });
+    const readStream = createReadStream(this.filePath, { encoding: "utf-8" });
+    const writeStream = createWriteStream(tmpPath, { encoding: "utf-8" });
 
-      // Track errors during writes to prevent unhandled error events
-      let writeError: Error | null = null;
-      writeStream.on("error", (err) => { writeError = err; });
-
-      const rl = createInterface({ input: readStream, crlfDelay: Infinity });
-
-      let lineNumber = 0;
-      for await (const line of rl) {
-        lineNumber++;
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          const entry = JSON.parse(trimmed) as LedgerEntry;
-          if (new Date(entry.timestamp).getTime() >= cutoff) {
-            if (!writeStream.destroyed) {
-              writeStream.write(trimmed + "\n");
+    // Line-splitting filter transform: buffers partial lines, parses JSON, retains by age
+    let remainder = "";
+    const lineFilter = new Transform({
+      encoding: "utf-8",
+      transform(chunk: string, _encoding, callback) {
+        const lines = (remainder + chunk).split("\n");
+        remainder = lines.pop() ?? "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const entry = JSON.parse(trimmed) as LedgerEntry;
+            if (new Date(entry.timestamp).getTime() >= cutoff) {
+              retainedIds.add(entry.id);
+              retainedCount++;
+              this.push(trimmed + "\n");
             }
-            retainedIds.add(entry.id);
-            retainedCount++;
+          } catch (err) {
+            skippedCount++;
+            logger.warn({ err, line: trimmed }, "Skipping malformed ledger entry during prune");
           }
-        } catch (err) {
-          skippedCount++;
-          logger.warn({ err, line: trimmed, lineNumber }, "Skipping malformed ledger entry during prune");
         }
-      }
+        callback();
+      },
+      flush(callback) {
+        if (remainder.trim()) {
+          try {
+            const entry = JSON.parse(remainder.trim()) as LedgerEntry;
+            if (new Date(entry.timestamp).getTime() >= cutoff) {
+              retainedIds.add(entry.id);
+              retainedCount++;
+              this.push(remainder.trim() + "\n");
+            }
+          } catch (err) {
+            skippedCount++;
+            logger.warn({ err, line: remainder.trim() }, "Skipping malformed ledger entry during prune");
+          }
+        }
+        callback();
+      },
+    });
 
-      // If stream already errored during writes, reject immediately
-      if (writeError) {
-        throw writeError;
-      }
-
-      await new Promise<void>((resolve, reject) => {
-        writeStream.once("error", reject);
-        writeStream.end(() => resolve());
-      });
-
+    try {
+      // pipeline() destroys all streams on error — no orphaned handles
+      await pipeline(readStream, lineFilter, writeStream);
       await rename(tmpPath, this.filePath);
       this.dispatched = retainedIds;
       logger.info({ retained: retainedCount, skipped: skippedCount, maxAgeDays }, "Pruned dispatch ledger");
     } catch (err) {
-      // Clean up temp file if anything fails, preserving the original
+      // Clean up temp file on all error paths; .bak is preserved intentionally
       try { await unlink(tmpPath); } catch { /* temp file may not exist */ }
       throw err;
     }
