@@ -19,7 +19,23 @@ describe("extractLinearIdentifier", () => {
 		expect(extractLinearIdentifier("linear-PROJ-9999")).toBe("PROJ-9999");
 	});
 
-	it("falls back to simple replace for unexpected formats", () => {
-		expect(extractLinearIdentifier("linear-some-other-format")).toBe("some-other-format");
+	it("handles lowercase team prefixes", () => {
+		expect(extractLinearIdentifier("linear-eng-42")).toBe("eng-42");
+	});
+
+	it("throws for malformed IDs without valid team-number pattern", () => {
+		expect(() => extractLinearIdentifier("linear-some-other-format")).toThrow("Invalid Linear task ID format");
+	});
+
+	it("throws for empty prefix after linear-", () => {
+		expect(() => extractLinearIdentifier("linear-")).toThrow("Invalid Linear task ID format");
+	});
+
+	it("throws for garbage input", () => {
+		expect(() => extractLinearIdentifier("garbage")).toThrow("Invalid Linear task ID format");
+	});
+
+	it("throws for double-prefixed IDs", () => {
+		expect(() => extractLinearIdentifier("linear-linear-LIN-123")).toThrow("Invalid Linear task ID format");
 	});
 });

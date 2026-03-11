@@ -3,6 +3,7 @@ import { BaseProvider } from "./base";
 import { TaskPriority } from "../core/queue";
 import { logger } from "../utils/logger";
 import { fetchWithRetry } from "../utils/http";
+import { LRUCache } from "../utils/lru-cache";
 import { z } from "zod";
 
 const LINEAR_API = "https://api.linear.app/graphql";
@@ -58,14 +59,17 @@ interface LinearIssue {
  * dispatch IDs ("linear-LIN-123-claude-code").
  */
 export function extractLinearIdentifier(taskId: string): string {
-  const match = taskId.match(/^linear-([A-Z]+-\d+)/);
-  return match ? match[1] : taskId.replace("linear-", "");
+  const match = taskId.match(/^linear-([A-Za-z]+-\d+)/);
+  if (!match) {
+    throw new Error(`Invalid Linear task ID format: expected linear-TEAM-123, got: ${taskId}`);
+  }
+  return match[1];
 }
 
 export class LinearProvider extends BaseProvider {
   name = "linear";
   private apiKey: string;
-  private stateIdCache = new Map<string, string>();
+  private stateIdCache = new LRUCache<string, string>(256);
 
   constructor(apiKey: string) {
     super();
