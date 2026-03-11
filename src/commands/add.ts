@@ -36,20 +36,21 @@ export async function add(projectPath: string): Promise<void> {
 		return;
 	}
 
-	// Config exists, just register the project
-	registry.projects.push({ path: absPath });
-	saveProjectsRegistry(registry);
-
-	// Ensure repo is cloned for worktree use
+	// Ensure repo is cloned for worktree use before registering
 	const config = loadProjectConfig(absPath);
 	if (config.repo) {
 		const projectName = basename(absPath);
 		try {
 			await ensureRepoClone(projectName, config.repo, config.branch);
 		} catch (err) {
-			warn(`Failed to clone repo: ${err instanceof Error ? err.message : err}`);
+			error(`Failed to clone repo: ${err instanceof Error ? err.message : err}`);
+			return;
 		}
 	}
+
+	// Only register project after all setup steps succeed
+	registry.projects.push({ path: absPath });
+	saveProjectsRegistry(registry);
 
 	success(`Registered project: ${absPath}`);
 }
