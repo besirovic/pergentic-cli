@@ -91,6 +91,7 @@ export interface ScheduledCommandService {
     worktree: WorktreeInfo,
     command: string,
     startTime: number,
+    timeoutMs?: number,
   ): Promise<{ success: boolean; prUrl?: string }>;
 }
 

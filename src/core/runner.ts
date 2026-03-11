@@ -440,8 +440,10 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
     const ctx = { taskId: payload.taskId, title: payload.title, project: projectName };
     await this.deps.lifecycle.recordStart(ctx);
 
+    const timeoutMs = (payload as ScheduledPayload).scheduleTimeout;
+
     this.deps.scheduledRunner.execute(
-      task, projectConfig, projectName, worktree, command, startTime,
+      task, projectConfig, projectName, worktree, command, startTime, timeoutMs,
     ).then((result) => {
       this.active.delete(task.id);
       if (result.success) {

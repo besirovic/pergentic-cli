@@ -159,6 +159,7 @@ export class Scheduler {
 					scheduledCommand: schedule.command,
 					schedulePrBehavior: schedule.prBehavior,
 					schedulePrBranch: schedule.prBranch,
+					scheduleTimeout: schedule.scheduleTimeout,
 					branch: schedule.branch,
 				},
 			};
