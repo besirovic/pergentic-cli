@@ -86,6 +86,12 @@ export async function logs(opts: {
     }
 
     const rl = createInterface({ input: tail.stdout });
+
+    const cleanup = (): void => {
+      rl.close();
+      tail.kill();
+    };
+
     rl.on("line", (line) => {
       if (opts.project) {
         try {
@@ -99,11 +105,19 @@ export async function logs(opts: {
     });
 
     await new Promise<void>((resolve) => {
-      process.once("SIGINT", () => {
-        rl.close();
-        tail.kill();
+      let resolved = false;
+      const done = (): void => {
+        if (resolved) return;
+        resolved = true;
+        cleanup();
         resolve();
-      });
+      };
+
+      process.once("SIGINT", done);
+      rl.once("error", done);
+      rl.once("close", done);
+      tail.once("exit", done);
+      tail.once("error", done);
     });
   }
 }
