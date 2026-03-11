@@ -23,8 +23,16 @@ export function isRunning(): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    // Process not running, clean stale PID file
+  } catch (err: unknown) {
+    const code =
+      err instanceof Error && "code" in err
+        ? (err as NodeJS.ErrnoException).code
+        : undefined;
+    if (code === "EPERM") {
+      // Permission denied — process exists but we can't signal it (different user)
+      return true;
+    }
+    // ESRCH or unknown error — process not running, clean stale PID file
     removePid();
     return false;
   }
