@@ -55,7 +55,9 @@ if [[ ${#TASK_IDS[@]} -gt 0 ]]; then
   :
 elif [[ "$ALL" == true ]] || [[ "$COUNT" -gt 0 ]]; then
   echo "Fetching ready tasks..."
-  readarray -t TASK_IDS < <(bd ready --json 2>/dev/null | jq -r '.[].id')
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && TASK_IDS+=("$line")
+  done < <(bd ready --json 2>/dev/null | jq -r '.[].id')
   if [[ "$ALL" == false ]] && [[ "$COUNT" -gt 0 ]]; then
     TASK_IDS=("${TASK_IDS[@]:0:$COUNT}")
   fi
@@ -85,13 +87,22 @@ PASSED=0
 FAILED=0
 SKIPPED=0
 FAILED_IDS=()
+INTERRUPTED=false
+
+trap 'INTERRUPTED=true; echo ""; echo "Interrupted. Finishing summary..."' INT TERM
 
 for id in "${TASK_IDS[@]}"; do
+  if [[ "$INTERRUPTED" == true ]]; then
+    SKIPPED=$(( ${#TASK_IDS[@]} - PASSED - FAILED ))
+    break
+  fi
   echo "=========================================="
   echo "Task: $id  [$(( PASSED + FAILED + 1 ))/${#TASK_IDS[@]}]"
   echo "=========================================="
 
-  if claude -p "/do $id — after completing the task, commit changes with a descriptive message"; then
+  CONFIG_TOOLS=$(jq -r '.permissions.allow[]' .claude/settings.local.json | tr '\n' ' ')
+  ALLOWED_TOOLS="Edit Write Read Glob Grep Agent $CONFIG_TOOLS"
+  if echo "/do $id — after completing the task, commit changes with a descriptive message, then close the task with bd close $id" | claude -p --allowedTools $ALLOWED_TOOLS; then
     PASSED=$((PASSED + 1))
     echo "  ✓ $id completed"
   else
