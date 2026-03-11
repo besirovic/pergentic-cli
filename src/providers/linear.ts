@@ -33,6 +33,24 @@ const IssueMutationResponseSchema = z.object({
   }),
 });
 
+const FetchTasksResponseSchema = z.object({
+  data: z.object({
+    issues: z.object({
+      nodes: z.array(
+        z.object({
+          id: z.string(),
+          identifier: z.string(),
+          title: z.string(),
+          description: z.string().nullable().optional(),
+          url: z.string(),
+          state: z.object({ name: z.string() }),
+          labels: z.object({ nodes: z.array(z.object({ name: z.string() })) }),
+        }),
+      ),
+    }),
+  }),
+});
+
 function checkGraphQLErrors(
   response: GraphQLResponse,
   context: string,
@@ -41,16 +59,6 @@ function checkGraphQLErrors(
     const messages = response.errors.map((e) => e.message).join("; ");
     throw new Error(`GraphQL error (${context}): ${messages}`);
   }
-}
-
-interface LinearIssue {
-  id: string;
-  identifier: string;
-  title: string;
-  description: string;
-  url: string;
-  state: { name: string };
-  labels: { nodes: Array<{ name: string }> };
 }
 
 /**
@@ -110,11 +118,13 @@ export class LinearProvider extends BaseProvider {
       }),
     });
 
-    const data = (await res.json()) as GraphQLResponse<{
-      issues?: { nodes: LinearIssue[] };
-    }>;
-    checkGraphQLErrors(data, "fetchTasks");
-    const issues = data.data?.issues?.nodes ?? [];
+    const raw = await res.json();
+    checkGraphQLErrors(raw as GraphQLResponse, "fetchTasks");
+    const parsed = FetchTasksResponseSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new Error(`Invalid Linear API response for fetchTasks: ${JSON.stringify(raw)}`);
+    }
+    const issues = parsed.data.data.issues.nodes;
     const tasks: IncomingTask[] = [];
 
     for (const issue of issues) {
