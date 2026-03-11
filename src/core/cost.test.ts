@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, rmSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { recordTaskCost, getTaskHistory } from "./cost";
+import { statsFilePath } from "../config/paths";
 
 const TEST_HOME = join("/tmp", `pergentic-cost-test-${process.pid}`);
 
@@ -32,5 +33,18 @@ describe("cost tracking", () => {
 		const history = await getTaskHistory();
 		expect(history).toHaveLength(2);
 		expect(history[1].status).toBe("failed");
+	});
+
+	it("recovers from corrupted stats file on next write", async () => {
+		// Write a corrupted (invalid JSON) stats file
+		const statsPath = statsFilePath();
+		writeFileSync(statsPath, "{ corrupted json !!!");
+
+		// recordTaskCost should succeed despite the corrupted file
+		await expect(recordTaskCost("task-recover", 0.5, 30, false, false)).resolves.not.toThrow();
+
+		// After the write, the file should be valid and contain the new entry
+		const history = await getTaskHistory();
+		expect(history.some((e) => e.taskId === "task-recover")).toBe(true);
 	});
 });

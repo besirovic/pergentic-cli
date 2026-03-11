@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, unlink } from "node:fs/promises";
 import { createLogger } from "./utils/logger";
 import { stateFilePath, statsFilePath } from "./config/paths";
-import { atomicWriteFileAsync } from "./utils/fs";
+import { atomicWriteFileAsync, safeJsonParseAsync } from "./utils/fs";
 import { basename } from "node:path";
 import { loadGlobalConfig, loadProjectsRegistry, ensureGlobalConfigDir } from "./config/loader";
 import { TaskQueue, TaskPriority } from "./core/queue";
@@ -311,23 +311,35 @@ async function loadTodayStats(): Promise<{
 		return statsCache.data;
 	}
 
-	try {
-		const statsPath = statsFilePath();
-		if (!existsSync(statsPath)) {
-			statsCache = { data: DEFAULT_DAILY_STATS, timestamp: Date.now() };
-			return DEFAULT_DAILY_STATS;
+	const statsPath = statsFilePath();
+	// Use null sentinel to distinguish "file missing" (ENOENT) from "corrupted"
+	const raw = await safeJsonParseAsync<{ dailyStats?: Record<string, unknown> } | null>(
+		statsPath,
+		null,
+	);
+
+	if (raw === null) {
+		// safeJsonParseAsync returns null for both ENOENT and corrupted JSON.
+		// If the file still exists it must be corrupted — delete it so the next
+		// stats write from cost.ts starts with a fresh file.
+		if (existsSync(statsPath)) {
+			logger.warn({ statsPath }, "Corrupted stats file detected, removing for recovery");
+			try {
+				await unlink(statsPath);
+			} catch {
+				// File may have been concurrently removed — ignore
+			}
 		}
-		const raw = JSON.parse(await readFile(statsPath, "utf-8"));
-		const today = new Date().toISOString().slice(0, 10);
-		const todayRaw = raw?.dailyStats?.[today];
-		const parsed = DailyStatsSchema.safeParse(todayRaw);
-		const data = parsed.success ? parsed.data : DEFAULT_DAILY_STATS;
-		statsCache = { data, timestamp: Date.now() };
-		return data;
-	} catch {
 		statsCache = { data: DEFAULT_DAILY_STATS, timestamp: Date.now() };
 		return DEFAULT_DAILY_STATS;
 	}
+
+	const today = new Date().toISOString().slice(0, 10);
+	const todayRaw = raw?.dailyStats?.[today];
+	const parsed = DailyStatsSchema.safeParse(todayRaw);
+	const data = parsed.success ? parsed.data : DEFAULT_DAILY_STATS;
+	statsCache = { data, timestamp: Date.now() };
+	return data;
 }
 
 main().catch((err) => {
