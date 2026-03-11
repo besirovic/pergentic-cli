@@ -5,12 +5,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Dev Commands
 
 ```bash
-yarn run build          # Build with tsup (ESM, node20 target) → dist/
-yarn run dev            # Run CLI directly via tsx (no build needed)
-yarn run test           # Run all tests with vitest
-yarn run test -- src/core/queue.test.ts  # Run a single test file
-yarn run test:watch     # Watch mode
-yarn run lint           # Type-check only (tsc --noEmit)
+yarn build          # Build with tsup (ESM, node20 target) → dist/
+yarn  dev            # Run CLI directly via tsx (no build needed)
+yarn test           # Run all tests with vitest
+yarn test -- src/core/queue.test.ts  # Run a single test file
+yarn test:watch     # Watch mode
+yarn lint           # Type-check only (tsc --noEmit)
 ```
 
 Package manager is **yarn** (lockfile: `yarn-lock.yaml`). Node >= 20 required.
