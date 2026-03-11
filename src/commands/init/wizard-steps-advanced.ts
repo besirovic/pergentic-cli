@@ -2,7 +2,7 @@ import { input, confirm } from "@inquirer/prompts";
 import chalk from "chalk";
 import { readRawGlobalConfig } from "../../config/loader";
 import { promptTheme } from "../../utils/prompt-helpers";
-import type { ProjectConfig } from "../../config/schema";
+import { ProjectConfigSchema, type ProjectConfig } from "../../config/schema";
 import { LEGACY_KEY_FIELDS } from "./constants";
 import type { AgentNameType } from "./constants";
 import { agentDisplayName } from "./ui-helpers";
@@ -286,9 +286,11 @@ export async function maybeImportLegacyKeys(
 
 	for (const key of legacyKeys) {
 		const value = rawGlobal[key];
-		if (value !== undefined) {
-			(config as Record<string, unknown>)[key] = value;
-		}
+		if (value === undefined) continue;
+		const fieldSchema = ProjectConfigSchema.shape[key];
+		const parsed = fieldSchema.safeParse(value);
+		if (!parsed.success) continue;
+		Object.assign(config, { [key]: parsed.data });
 	}
 
 	console.log(chalk.green("  Imported legacy keys into project config."));
