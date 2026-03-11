@@ -148,6 +148,7 @@ async function main(): Promise<void> {
 	const stateInterval = setInterval(() => {
 		updateState(runner, queue);
 	}, DAEMON.STATE_UPDATE_INTERVAL_MS);
+	stateInterval.unref();
 
 	// HTTP server with router
 	const { server, get, post } = createDaemonServer();
