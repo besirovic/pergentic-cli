@@ -49,8 +49,12 @@ export function agentDisplayName(agent: AgentNameType): string {
 	return allAgents.find((a) => a.value === agent)?.name ?? agent;
 }
 
+/**
+ * Masks an API key for display. Keys under 20 characters are fully masked.
+ * Keys 20+ characters show at most 6 prefix and 4 suffix characters.
+ */
 export function maskKey(key: string): string {
-	if (key.length <= 10) return "***";
+	if (key.length < 20) return "***";
 	return `${key.slice(0, 6)}***${key.slice(-4)}`;
 }
 
