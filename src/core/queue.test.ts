@@ -192,4 +192,17 @@ describe("TaskQueue", () => {
       expect(q.hasScheduleId("a")).toBe(false);
     });
   });
+
+  it("remove with 10000 items completes in < 10ms", () => {
+    const q = new TaskQueue();
+    for (let i = 0; i < 10_000; i++) {
+      q.add(makeTask(`task-${i}`, TaskPriority.NEW));
+    }
+
+    const start = performance.now();
+    // Remove an item near the middle
+    expect(q.remove("task-5000")).toBe(true);
+    const elapsed = performance.now() - start;
+    expect(elapsed).toBeLessThan(10);
+  });
 });

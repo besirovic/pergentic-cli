@@ -42,6 +42,7 @@ export interface ScheduledPayload extends BasePayload {
   scheduledCommand?: string;
   schedulePrBehavior?: "new" | "update";
   schedulePrBranch?: string | null;
+  scheduleTimeout?: number;
   branch?: string;
 }
 
@@ -57,6 +58,7 @@ export class TaskQueue {
   private tasks: Task[] = [];
   private seen = new Set<string>();
   private failed = new Set<string>();
+  private index = new Map<string, number>();
 
   add(task: Task): boolean {
     if (this.seen.has(task.id)) return false;
@@ -71,12 +73,24 @@ export class TaskQueue {
       else hi = mid;
     }
     this.tasks.splice(lo, 0, task);
+
+    // Update indices from insertion point onward
+    for (let i = lo; i < this.tasks.length; i++) {
+      this.index.set(this.tasks[i].id, i);
+    }
     return true;
   }
 
   next(): Task | undefined {
     const task = this.tasks.shift();
-    if (task) this.seen.delete(task.id);
+    if (task) {
+      this.seen.delete(task.id);
+      this.index.delete(task.id);
+      // Decrement all remaining indices
+      for (let i = 0; i < this.tasks.length; i++) {
+        this.index.set(this.tasks[i].id, i);
+      }
+    }
     return task;
   }
 
@@ -97,10 +111,15 @@ export class TaskQueue {
   }
 
   remove(id: string): boolean {
-    const idx = this.tasks.findIndex((t) => t.id === id);
-    if (idx === -1) return false;
+    const idx = this.index.get(id);
+    if (idx === undefined) return false;
     this.tasks.splice(idx, 1);
     this.seen.delete(id);
+    this.index.delete(id);
+    // Update indices from removal point onward
+    for (let i = idx; i < this.tasks.length; i++) {
+      this.index.set(this.tasks[i].id, i);
+    }
     return true;
   }
 
@@ -125,5 +144,6 @@ export class TaskQueue {
   clear(): void {
     this.tasks = [];
     this.seen.clear();
+    this.index.clear();
   }
 }
