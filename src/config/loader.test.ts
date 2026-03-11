@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, rmSync, existsSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, existsSync, writeFileSync, writeSync, openSync, closeSync } from "node:fs";
 import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 import {
@@ -9,10 +9,12 @@ import {
 	saveProjectsRegistry,
 	loadProjectConfig,
 	saveProjectConfig,
+	modifyProjectsRegistry,
+	modifyProjectConfig,
 	ensureGlobalConfigDir,
 	readRawGlobalConfig,
 } from "./loader";
-import { readYaml } from "./yaml-io";
+import { readYaml, withFileLock } from "./yaml-io";
 
 const TEST_HOME = join("/tmp", `pergentic-test-${process.pid}`);
 
@@ -167,5 +169,147 @@ describe("config loader", () => {
 		writeFileSync(emptyPath, "", "utf-8");
 
 		expect(readYaml(emptyPath)).toEqual({});
+	});
+});
+
+describe("withFileLock", () => {
+	const TEST_LOCK_HOME = join("/tmp", `pergentic-lock-test-${process.pid}`);
+
+	beforeEach(() => {
+		if (existsSync(TEST_LOCK_HOME)) rmSync(TEST_LOCK_HOME, { recursive: true });
+		mkdirSync(TEST_LOCK_HOME, { recursive: true });
+	});
+
+	afterEach(() => {
+		if (existsSync(TEST_LOCK_HOME)) rmSync(TEST_LOCK_HOME, { recursive: true });
+	});
+
+	it("runs the callback and returns its value", () => {
+		const filePath = join(TEST_LOCK_HOME, "data.yaml");
+		writeFileSync(filePath, "", "utf-8");
+
+		const result = withFileLock(filePath, () => 42);
+		expect(result).toBe(42);
+	});
+
+	it("cleans up the lock file after success", () => {
+		const filePath = join(TEST_LOCK_HOME, "data.yaml");
+		writeFileSync(filePath, "", "utf-8");
+		const lockPath = filePath + ".lock";
+
+		withFileLock(filePath, () => {});
+		expect(existsSync(lockPath)).toBe(false);
+	});
+
+	it("cleans up the lock file after an error in callback", () => {
+		const filePath = join(TEST_LOCK_HOME, "data.yaml");
+		writeFileSync(filePath, "", "utf-8");
+		const lockPath = filePath + ".lock";
+
+		expect(() =>
+			withFileLock(filePath, () => {
+				throw new Error("boom");
+			}),
+		).toThrow("boom");
+		expect(existsSync(lockPath)).toBe(false);
+	});
+
+	it("throws when a stale lock file blocks acquisition", { timeout: 10000 }, () => {
+		const filePath = join(TEST_LOCK_HOME, "data.yaml");
+		writeFileSync(filePath, "", "utf-8");
+		const lockPath = filePath + ".lock";
+
+		// Simulate a stuck lock by writing it manually and never releasing
+		const fd = openSync(lockPath, "wx");
+		closeSync(fd);
+
+		expect(() =>
+			withFileLock(filePath, () => {}),
+		).toThrow(/Failed to acquire lock/);
+
+		// Clean up the stale lock
+		rmSync(lockPath);
+	});
+});
+
+describe("modifyProjectsRegistry", () => {
+	const TEST_HOME2 = join("/tmp", `pergentic-modify-test-${process.pid}`);
+
+	beforeEach(() => {
+		process.env.PERGENTIC_HOME = TEST_HOME2;
+		if (existsSync(TEST_HOME2)) rmSync(TEST_HOME2, { recursive: true });
+		mkdirSync(TEST_HOME2, { recursive: true });
+	});
+
+	afterEach(() => {
+		delete process.env.PERGENTIC_HOME;
+		if (existsSync(TEST_HOME2)) rmSync(TEST_HOME2, { recursive: true });
+	});
+
+	it("adds a project atomically", () => {
+		modifyProjectsRegistry((r) => {
+			r.projects.push({ path: "/tmp/proj-a" });
+		});
+		const loaded = loadProjectsRegistry();
+		expect(loaded.projects).toHaveLength(1);
+		expect(loaded.projects[0].path).toBe("/tmp/proj-a");
+	});
+
+	it("removes a project atomically", () => {
+		saveProjectsRegistry({ projects: [{ path: "/tmp/proj-a" }, { path: "/tmp/proj-b" }] });
+
+		modifyProjectsRegistry((r) => {
+			r.projects = r.projects.filter((p) => p.path !== "/tmp/proj-a");
+		});
+
+		const loaded = loadProjectsRegistry();
+		expect(loaded.projects).toHaveLength(1);
+		expect(loaded.projects[0].path).toBe("/tmp/proj-b");
+	});
+
+	it("preserves all existing entries when adding", () => {
+		saveProjectsRegistry({ projects: [{ path: "/tmp/proj-existing" }] });
+
+		modifyProjectsRegistry((r) => {
+			r.projects.push({ path: "/tmp/proj-new" });
+		});
+
+		const loaded = loadProjectsRegistry();
+		expect(loaded.projects).toHaveLength(2);
+	});
+});
+
+describe("modifyProjectConfig", () => {
+	const TEST_HOME3 = join("/tmp", `pergentic-modcfg-test-${process.pid}`);
+
+	beforeEach(() => {
+		process.env.PERGENTIC_HOME = TEST_HOME3;
+		if (existsSync(TEST_HOME3)) rmSync(TEST_HOME3, { recursive: true });
+		mkdirSync(TEST_HOME3, { recursive: true });
+	});
+
+	afterEach(() => {
+		delete process.env.PERGENTIC_HOME;
+		if (existsSync(TEST_HOME3)) rmSync(TEST_HOME3, { recursive: true });
+	});
+
+	it("updates a project config field atomically", () => {
+		const projectPath = join(TEST_HOME3, "proj");
+		mkdirSync(join(projectPath, ".pergentic"), { recursive: true });
+
+		saveProjectConfig(projectPath, {
+			repo: "git@github.com:user/repo.git",
+			branch: "main",
+			agent: "claude-code" as const,
+			configuredAgents: [],
+		});
+
+		modifyProjectConfig(projectPath, (c) => {
+			c.branch = "develop";
+		});
+
+		const loaded = loadProjectConfig(projectPath);
+		expect(loaded.branch).toBe("develop");
+		expect(loaded.repo).toBe("git@github.com:user/repo.git");
 	});
 });

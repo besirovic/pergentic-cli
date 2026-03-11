@@ -6,7 +6,7 @@ import {
 	type SchedulesConfig,
 } from "./schema";
 import { schedulesConfigPath, schedulesDir, schedulePromptPath } from "./paths";
-import { readYaml, writeYaml } from "./yaml-io";
+import { readYaml, writeYaml, withFileLock } from "./yaml-io";
 
 export function loadSchedulesConfig(projectPath: string): SchedulesConfig {
 	const raw = readYaml(schedulesConfigPath(projectPath));
@@ -18,38 +18,50 @@ export function saveSchedulesConfig(projectPath: string, config: SchedulesConfig
 }
 
 export function addScheduleEntry(projectPath: string, entry: ScheduleEntry): void {
-	const config = loadSchedulesConfig(projectPath);
-	config.schedules.push(entry);
-	saveSchedulesConfig(projectPath, config);
+	const filePath = schedulesConfigPath(projectPath);
+	withFileLock(filePath, () => {
+		const config = loadSchedulesConfig(projectPath);
+		config.schedules.push(entry);
+		saveSchedulesConfig(projectPath, config);
+	});
 }
 
 export function removeScheduleEntry(projectPath: string, nameOrId: string): boolean {
-	const config = loadSchedulesConfig(projectPath);
-	const before = config.schedules.length;
-	config.schedules = config.schedules.filter(
-		(s) => s.name !== nameOrId && s.id !== nameOrId,
-	);
-	if (config.schedules.length === before) return false;
-	saveSchedulesConfig(projectPath, config);
-	return true;
+	const filePath = schedulesConfigPath(projectPath);
+	return withFileLock(filePath, () => {
+		const config = loadSchedulesConfig(projectPath);
+		const before = config.schedules.length;
+		config.schedules = config.schedules.filter(
+			(s) => s.name !== nameOrId && s.id !== nameOrId,
+		);
+		if (config.schedules.length === before) return false;
+		saveSchedulesConfig(projectPath, config);
+		return true;
+	});
 }
 
 export function setScheduleEnabled(projectPath: string, nameOrId: string, enabled: boolean): boolean {
-	const config = loadSchedulesConfig(projectPath);
-	const entry = config.schedules.find((s) => s.name === nameOrId || s.id === nameOrId);
-	if (!entry) return false;
-	entry.enabled = enabled;
-	saveSchedulesConfig(projectPath, config);
-	return true;
+	const filePath = schedulesConfigPath(projectPath);
+	return withFileLock(filePath, () => {
+		const config = loadSchedulesConfig(projectPath);
+		const entry = config.schedules.find((s) => s.name === nameOrId || s.id === nameOrId);
+		if (!entry) return false;
+		entry.enabled = enabled;
+		saveSchedulesConfig(projectPath, config);
+		return true;
+	});
 }
 
 export function updateLastRun(projectPath: string, scheduleId: string, timestamp: string): void {
-	const config = loadSchedulesConfig(projectPath);
-	const entry = config.schedules.find((s) => s.id === scheduleId);
-	if (entry) {
-		entry.lastRun = timestamp;
-		saveSchedulesConfig(projectPath, config);
-	}
+	const filePath = schedulesConfigPath(projectPath);
+	withFileLock(filePath, () => {
+		const config = loadSchedulesConfig(projectPath);
+		const entry = config.schedules.find((s) => s.id === scheduleId);
+		if (entry) {
+			entry.lastRun = timestamp;
+			saveSchedulesConfig(projectPath, config);
+		}
+	});
 }
 
 export function ensureSchedulesDir(projectPath: string): void {

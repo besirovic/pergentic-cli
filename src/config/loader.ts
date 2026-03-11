@@ -14,7 +14,7 @@ import {
   globalConfigDir,
 } from "./paths";
 import { loadSecrets, SECRET_FIELDS, validateSecretValue, type ResolvedSecrets } from "./env";
-import { readYaml, writeYaml } from "./yaml-io";
+import { readYaml, writeYaml, withFileLock } from "./yaml-io";
 import { invalidateConfigCache } from "./cache";
 import { logger } from "../utils/logger";
 
@@ -29,6 +29,20 @@ export function loadGlobalConfig(): GlobalConfig {
 
 export function saveGlobalConfig(config: GlobalConfig): void {
   writeYaml(globalConfigPath(), config);
+}
+
+/**
+ * Atomically load, modify, and save the global config under a file lock.
+ * Prevents lost updates from concurrent read-modify-write sequences.
+ */
+export function modifyGlobalConfig(fn: (config: GlobalConfig) => void): void {
+  const filePath = globalConfigPath();
+  withFileLock(filePath, () => {
+    const raw = readYaml(filePath);
+    const config = GlobalConfigSchema.parse(raw);
+    fn(config);
+    writeYaml(filePath, config);
+  });
 }
 
 export function loadProjectConfig(projectPath: string): ProjectConfig {
@@ -84,6 +98,23 @@ export function saveProjectConfig(
   invalidateConfigCache(projectPath);
 }
 
+/**
+ * Atomically load, modify, and save a project config under a file lock.
+ * Prevents lost updates from concurrent read-modify-write sequences.
+ */
+export function modifyProjectConfig(
+  projectPath: string,
+  fn: (config: ProjectConfig) => void,
+): void {
+  const filePath = projectConfigPath(projectPath);
+  withFileLock(filePath, () => {
+    const config = loadProjectConfig(projectPath);
+    fn(config);
+    writeYaml(filePath, config);
+    invalidateConfigCache(projectPath);
+  });
+}
+
 export function loadProjectsRegistry(): ProjectsRegistry {
   const raw = readYaml(projectsRegistryPath());
   return ProjectsRegistrySchema.parse(raw);
@@ -91,6 +122,22 @@ export function loadProjectsRegistry(): ProjectsRegistry {
 
 export function saveProjectsRegistry(registry: ProjectsRegistry): void {
   writeYaml(projectsRegistryPath(), registry);
+}
+
+/**
+ * Atomically load, modify, and save the projects registry under a file lock.
+ * Prevents lost updates from concurrent read-modify-write sequences.
+ */
+export function modifyProjectsRegistry(
+  fn: (registry: ProjectsRegistry) => void,
+): void {
+  const filePath = projectsRegistryPath();
+  withFileLock(filePath, () => {
+    const raw = readYaml(filePath);
+    const registry = ProjectsRegistrySchema.parse(raw);
+    fn(registry);
+    writeYaml(filePath, registry);
+  });
 }
 
 export function readRawGlobalConfig(): Record<string, unknown> {
