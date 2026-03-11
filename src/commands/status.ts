@@ -6,6 +6,7 @@ import { loadGlobalConfig } from "../config/loader";
 import { readState, type DaemonState } from "../utils/daemon-state";
 import { formatDuration } from "../utils/format";
 import { TIMEOUTS } from "../config/constants";
+import { isValidHostname, isValidPort } from "../utils/project-validation";
 
 function getFreePort(): Promise<number> {
 	return new Promise((resolve, reject) => {
@@ -33,14 +34,25 @@ async function fetchRemoteStatus(remoteName: string): Promise<void> {
 		return;
 	}
 
+	if (!isValidHostname(remote.host)) {
+		error(`Invalid remote hostname: "${remote.host}". Hostname must be a valid DNS name and must not start with '-'.`);
+		return;
+	}
+
+	if (!isValidPort(remote.port)) {
+		error(`Invalid remote port: "${remote.port}". Port must be an integer between 1 and 65535.`);
+		return;
+	}
+
 	const localPort = await getFreePort();
 	const tunnel = spawn("ssh", [
 		"-L",
 		`${localPort}:127.0.0.1:${remote.port}`,
-		remote.host,
 		"-N",
 		"-o",
 		"ConnectTimeout=5",
+		"--",
+		remote.host,
 	]);
 
 	// Wait for tunnel to establish

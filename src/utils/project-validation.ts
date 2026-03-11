@@ -15,3 +15,16 @@ export function validateProjectPath(projectPath: string): Result<string, string>
 
   return ok(absPath);
 }
+
+const HOSTNAME_RE = /^[a-zA-Z0-9]([a-zA-Z0-9.\-]*[a-zA-Z0-9])?$/;
+
+export function isValidHostname(host: string): boolean {
+  if (!host || host.length > 253) return false;
+  if (host.startsWith("-")) return false;
+  return HOSTNAME_RE.test(host);
+}
+
+export function isValidPort(port: unknown): boolean {
+  const n = typeof port === "string" ? Number(port) : port;
+  return typeof n === "number" && Number.isInteger(n) && n >= 1 && n <= 65535;
+}
