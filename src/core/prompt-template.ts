@@ -46,20 +46,41 @@ export function buildTemplateContext(
 	};
 }
 
+// Sentinels used to temporarily replace escaped braces ({{ and }}) during substitution.
+const LBRACE_SENTINEL = "\x00LBRACE\x00";
+const RBRACE_SENTINEL = "\x00RBRACE\x00";
+
+/**
+ * Temporarily encode {{ and }} to prevent them from being treated as placeholders.
+ */
+function escapeBraces(s: string): string {
+	return s.replace(/\{\{/g, LBRACE_SENTINEL).replace(/\}\}/g, RBRACE_SENTINEL);
+}
+
+/**
+ * Restore encoded {{ and }} back to literal { and }.
+ */
+function unescapeBraces(s: string): string {
+	return s.replaceAll(LBRACE_SENTINEL, "{").replaceAll(RBRACE_SENTINEL, "}");
+}
+
 /**
  * Resolve a template string by replacing {var} placeholders.
+ * Use {{ and }} to include literal braces that are not treated as placeholders.
  * Unknown variables are left as-is.
  */
 export function resolveTemplate(
 	template: string,
 	context: PromptTemplateContext,
 ): string {
-	return template.replace(/\{(\w+)\}/g, (match, key: string) => {
+	const escaped = escapeBraces(template);
+	const resolved = escaped.replace(/\{(\w+)\}/g, (match, key: string) => {
 		if (key in context) {
 			return context[key as PromptTemplateVar];
 		}
 		return match;
 	});
+	return unescapeBraces(resolved);
 }
 
 /**
@@ -92,9 +113,11 @@ export async function loadPromptTemplate(
 
 /**
  * Validate template variables. Returns list of unknown variable names.
+ * Escaped braces ({{ and }}) are ignored — they are treated as literal text.
  */
 export function validateTemplate(template: string): string[] {
-	const usedVars = [...template.matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
+	const escaped = escapeBraces(template);
+	const usedVars = [...escaped.matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
 	return usedVars.filter(
 		(v) => !PROMPT_TEMPLATE_VARS.includes(v as PromptTemplateVar),
 	);
