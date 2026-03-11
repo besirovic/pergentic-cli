@@ -1,5 +1,6 @@
 import type { Agent, AgentCommand, AgentOptions, AgentToolDef } from "./types";
 import { spawnAsync } from "../utils/process";
+import { sanitizePrompt } from "./sanitize-prompt";
 
 const VERSION_CHECK_TIMEOUT_MS = 5000;
 
@@ -21,7 +22,7 @@ export const claudeCode: Agent = {
   tools: CLAUDE_CODE_TOOLS,
 
   buildCommand(prompt: string, workdir: string, options?: AgentOptions): AgentCommand {
-    const args = ["-p", prompt, "--output-format", "text"];
+    const args = ["-p", sanitizePrompt(prompt), "--output-format", "text"];
 
     const tools = options?.allowedTools?.length
       ? options.allowedTools

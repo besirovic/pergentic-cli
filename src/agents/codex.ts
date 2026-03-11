@@ -1,5 +1,6 @@
 import type { Agent, AgentCommand, AgentOptions, AgentToolDef } from "./types";
 import { spawnAsync } from "../utils/process";
+import { sanitizePrompt } from "./sanitize-prompt";
 
 const VERSION_CHECK_TIMEOUT_MS = 5000;
 
@@ -20,7 +21,7 @@ export const codex: Agent = {
       ? options.allowedTools
       : CODEX_TOOLS.filter((t) => t.default).map((t) => t.name);
 
-    const args = ["--quiet", prompt];
+    const args = ["--quiet", sanitizePrompt(prompt)];
 
     if (tools.includes("shell") && tools.includes("file_edit") && tools.includes("file_write")) {
       args.push("--full-auto");

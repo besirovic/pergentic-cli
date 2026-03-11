@@ -1,5 +1,6 @@
 import type { Agent, AgentCommand, AgentOptions } from "./types";
 import { spawnAsync } from "../utils/process";
+import { sanitizePrompt } from "./sanitize-prompt";
 
 const VERSION_CHECK_TIMEOUT_MS = 5000;
 
@@ -8,7 +9,7 @@ export const aider: Agent = {
   tools: [],
 
   buildCommand(prompt: string, _workdir: string, options?: AgentOptions): AgentCommand {
-    const args = ["--message", prompt, "--yes"];
+    const args = ["--message", sanitizePrompt(prompt), "--yes"];
     if (options?.model) {
       args.push("--model", options.model);
     }

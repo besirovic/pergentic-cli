@@ -1,5 +1,6 @@
 import type { Agent, AgentCommand, AgentOptions, AgentToolDef } from "./types";
 import { spawnAsync } from "../utils/process";
+import { sanitizePrompt } from "./sanitize-prompt";
 
 const VERSION_CHECK_TIMEOUT_MS = 5000;
 
@@ -22,7 +23,7 @@ export const opencode: Agent = {
       ? options.allowedTools
       : OPENCODE_TOOLS.filter((t) => t.default).map((t) => t.name);
 
-    const args = ["run", prompt];
+    const args = ["run", sanitizePrompt(prompt)];
 
     for (const tool of tools) {
       args.push("--tool", tool);
