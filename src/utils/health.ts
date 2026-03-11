@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync, openSync, closeSync, unlinkSync, existsSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { readFileSync, writeFileSync, openSync, closeSync, unlinkSync, existsSync, renameSync } from "node:fs";
 import { daemonPidPath, daemonLockPath } from "../config/paths";
 import { FILE_MODES } from "../config/constants";
 import { logger } from "./logger";
@@ -47,13 +48,20 @@ export function removePid(): void {
 
 /**
  * Acquire an exclusive lock file. Returns true if acquired, false if another instance holds it.
- * Uses the 'wx' flag (write + exclusive create) for atomic lock acquisition.
+ *
+ * Fast path: atomic O_CREAT|O_EXCL open ('wx' flag) — only one process can create the file.
+ *
+ * Stale lock path: when a lock file exists but the holder process is dead, we use an atomic
+ * rename to replace it. A unique nonce written to a temp file and renamed over the stale lock
+ * lets us verify we won any concurrent replacement race without a separate unlink+create
+ * sequence that would reintroduce a TOCTOU window.
  */
 export function acquireLock(): boolean {
   const lockFile = daemonLockPath();
   const maxAttempts = 3;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    // Fast path: atomic exclusive create (O_CREAT|O_EXCL).
     try {
       const fd = openSync(lockFile, "wx", FILE_MODES.SECURE);
       try {
@@ -71,30 +79,70 @@ export function acquireLock(): boolean {
         logger.error({ err }, "Failed to acquire lock file");
         return false;
       }
-      // Lock file exists — check if the holding process is still alive
-      let originalPid = NaN;
+    }
+
+    // Lock file exists — check if the holder process is still alive.
+    let holderPid: number = NaN;
+    try {
+      // parseInt stops at ':' so it correctly extracts the PID from both
+      // "pid" (fast-path) and "pid:nonce" (rename-path) content formats.
+      holderPid = parseInt(readFileSync(lockFile, "utf-8").trim(), 10);
+    } catch {
+      // File removed between our open-check and read — retry fast path.
+      continue;
+    }
+
+    if (!Number.isNaN(holderPid)) {
       try {
-        originalPid = parseInt(readFileSync(lockFile, "utf-8").trim(), 10);
-        if (!Number.isNaN(originalPid)) {
-          process.kill(originalPid, 0); // throws if process doesn't exist
-          return false; // process is alive, lock is valid
+        process.kill(holderPid, 0);
+        return false; // process is alive, lock is valid
+      } catch (killErr: unknown) {
+        const code =
+          killErr instanceof Error && "code" in killErr
+            ? (killErr as NodeJS.ErrnoException).code
+            : undefined;
+        if (code === "EPERM") {
+          return false; // alive but owned by a different user
         }
-      } catch {
-        // Process is dead or PID unreadable — stale lock
+        // ESRCH — process is dead, stale lock
       }
-      // Guard against TOCTOU race: between the liveness check above and
-      // the unlink below, the stale lock could be cleaned up by another
-      // instance which then creates a new valid lock with a different PID.
-      // Re-read to verify the PID hasn't changed before removing.
+    }
+
+    // Stale lock detected. Replace it atomically using rename so that two
+    // concurrent processes racing on the same stale lock can both proceed
+    // without either incorrectly believing it holds the lock.
+    //
+    // Both processes write their claim to distinct temp files then rename
+    // over the stale lock. rename(2) is atomic on POSIX — the last rename
+    // wins. After renaming, each process reads the lock back and checks
+    // whether its unique nonce is still present. Only one can win; the
+    // other detects the mismatch and returns false.
+    const nonce = randomBytes(8).toString("hex");
+    const claim = `${process.pid}:${nonce}`;
+    const tempFile = `${lockFile}.${process.pid}.${nonce}.tmp`;
+
+    try {
+      writeFileSync(tempFile, claim, { encoding: "utf-8", mode: FILE_MODES.SECURE });
+      renameSync(tempFile, lockFile);
+
+      // Verify our rename won the race.
       try {
-        const currentPid = parseInt(readFileSync(lockFile, "utf-8").trim(), 10);
-        if (!Number.isNaN(currentPid) && currentPid !== originalPid) {
-          // PID changed — another process acquired a new lock; don't steal it
-          return false;
+        const content = readFileSync(lockFile, "utf-8").trim();
+        if (content === claim) {
+          return true; // we hold the lock
         }
-        unlinkSync(lockFile);
+        // Another process's rename landed after ours — they hold the lock.
+        return false;
       } catch {
-        // Another process may have already removed it; retry will handle it
+        // Lock file disappeared again; retry fast path.
+        continue;
+      }
+    } catch {
+      // Temp file creation or rename failed; clean up and retry.
+      try {
+        unlinkSync(tempFile);
+      } catch {
+        // Already gone or never created — ignore.
       }
     }
   }
@@ -105,7 +153,14 @@ export function acquireLock(): boolean {
 
 export function releaseLock(): void {
   const lockFile = daemonLockPath();
-  if (existsSync(lockFile)) {
-    unlinkSync(lockFile);
+  try {
+    const content = readFileSync(lockFile, "utf-8").trim();
+    // parseInt handles both "pid" and "pid:nonce" content formats.
+    const storedPid = parseInt(content, 10);
+    if (storedPid === process.pid) {
+      unlinkSync(lockFile);
+    }
+  } catch {
+    // File doesn't exist or is unreadable — nothing to release.
   }
 }
