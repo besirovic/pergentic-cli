@@ -17,7 +17,7 @@ import { createDaemonServer, parseJsonBody } from "./utils/daemon-server";
 import { TaskSource, type ProjectConfig } from "./config/schema";
 import { DAEMON, LIMITS } from "./config/constants";
 import { z } from "zod";
-import type { Task, ScheduledPayload } from "./core/queue";
+import { isScheduledTask, type Task } from "./core/queue";
 import type { TaskProvider } from "./providers/types";
 
 const logger = createLogger("daemon");
@@ -104,8 +104,8 @@ async function main(): Promise<void> {
 
 	// Call provider onComplete when tasks complete, and clear scheduler active set
 	runner.on("taskCompleted", async (task: Task, meta) => {
-		if (task.type === "scheduled" && (task.payload as ScheduledPayload).scheduleId) {
-			scheduler.clearActive((task.payload as ScheduledPayload).scheduleId!);
+		if (isScheduledTask(task) && task.payload.scheduleId) {
+			scheduler.clearActive(task.payload.scheduleId);
 		}
 
 		// Call provider onComplete to update ticket status
@@ -139,8 +139,8 @@ async function main(): Promise<void> {
 		}
 	});
 	runner.on("taskFailed", (task: Task) => {
-		if (task.type === "scheduled" && (task.payload as ScheduledPayload).scheduleId) {
-			scheduler.clearActive((task.payload as ScheduledPayload).scheduleId!);
+		if (isScheduledTask(task) && task.payload.scheduleId) {
+			scheduler.clearActive(task.payload.scheduleId);
 		}
 	});
 

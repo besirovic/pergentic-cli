@@ -13,9 +13,13 @@ import {
   projectConfigPath,
   globalConfigDir,
 } from "./paths";
-import { loadSecrets, SECRET_FIELDS } from "./env";
+import { loadSecrets, SECRET_FIELDS, type ResolvedSecrets } from "./env";
 import { readYaml, writeYaml } from "./yaml-io";
 import { logger } from "../utils/logger";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 export function loadGlobalConfig(): GlobalConfig {
   const raw = readYaml(globalConfigPath());
@@ -28,7 +32,10 @@ export function saveGlobalConfig(config: GlobalConfig): void {
 
 export function loadProjectConfig(projectPath: string): ProjectConfig {
   const configFile = projectConfigPath(projectPath);
-  const raw = readYaml(configFile) as Record<string, unknown>;
+  const raw = readYaml(configFile);
+  if (!isRecord(raw)) {
+    throw new Error(`Config at ${configFile} must be a YAML mapping`);
+  }
 
   // Warn if secrets are found directly in config.yaml
   const secretFieldNames = Object.keys(SECRET_FIELDS);
@@ -47,9 +54,9 @@ export function loadProjectConfig(projectPath: string): ProjectConfig {
   // Merge env-based secrets: config values take precedence (backwards compat)
   const secrets = loadSecrets(projectPath);
   for (const field of Object.keys(SECRET_FIELDS)) {
-    const key = field as keyof typeof secrets;
+    const key = field as keyof ResolvedSecrets;
     if (config[key] === undefined && secrets[key] !== undefined) {
-      (config as Record<string, unknown>)[key] = secrets[key];
+      Object.assign(config, { [key]: secrets[key] });
     }
   }
 
@@ -74,7 +81,7 @@ export function saveProjectsRegistry(registry: ProjectsRegistry): void {
 
 export function readRawGlobalConfig(): Record<string, unknown> {
   const raw = readYaml(globalConfigPath());
-  return (raw as Record<string, unknown>) ?? {};
+  return isRecord(raw) ? raw : {};
 }
 
 export function ensureGlobalConfigDir(): void {

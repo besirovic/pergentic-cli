@@ -2,7 +2,8 @@ import { type ChildProcess } from "node:child_process";
 import type { WorktreeInfo } from "./worktree";
 import { logger } from "../utils/logger";
 import { TypedEventEmitter } from "../types/typed-emitter";
-import type { Task, ScheduledPayload, FeedbackPayload } from "./queue";
+import type { Task, ScheduledTask } from "./queue";
+import { isScheduledTask, isFeedbackTask } from "./queue";
 import { AgentName } from "../config/schema";
 import type { GlobalConfig, ProjectConfig } from "../config/schema";
 import { buildBranchName, buildBranchTemplateVars, DEFAULT_BRANCH_TEMPLATE } from "./branch-name";
@@ -89,13 +90,14 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       await this.deps.worktree.ensureRepoClone(projectName, projectConfig.repo, projectConfig.branch);
       freshClone = !repoExisted;
 
-      const isStandingBranch = task.type === "scheduled"
-        && (payload as ScheduledPayload).schedulePrBehavior === "update"
-        && !!(payload as ScheduledPayload).schedulePrBranch;
-
-      const worktreeTaskId = isStandingBranch
-          ? (payload as ScheduledPayload).schedulePrBranch!
-          : payload.taskId;
+      let isStandingBranch = false;
+      let worktreeTaskId = payload.taskId;
+      if (isScheduledTask(task)
+          && task.payload.schedulePrBehavior === "update"
+          && task.payload.schedulePrBranch) {
+        isStandingBranch = true;
+        worktreeTaskId = task.payload.schedulePrBranch;
+      }
 
       // Resolve branch name from template (skip for standing branches and default template)
       const rawAgentName = payload.targetAgents?.[0] ?? projectConfig.agent;
@@ -128,18 +130,18 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
       // Build prompt
       let prompt: string;
 
-      if (task.type === "feedback") {
+      if (isFeedbackTask(task)) {
         await this.deps.git.pullBranch(worktree.path, worktree.branch);
         const history =
           (await this.deps.feedback.loadHistory(worktree.path)) ??
           (await this.deps.feedback.initHistory(worktree.path, payload.taskId, payload.description));
-        const comment = (payload as FeedbackPayload).comment ?? "";
+        const comment = task.payload.comment ?? "";
         await this.deps.feedback.addFeedbackRound(worktree.path, comment);
         prompt = this.deps.feedback.buildFeedbackPrompt(history, comment);
-      } else if (task.type === "scheduled" && (payload as ScheduledPayload).scheduledCommand) {
+      } else if (isScheduledTask(task) && task.payload.scheduledCommand) {
         return this.runScheduledCommand(task, projectConfig, projectName, worktree, startTime);
-      } else if (task.type === "scheduled" && !(payload as ScheduledPayload).scheduledCommand) {
-        prompt = payload.description;
+      } else if (isScheduledTask(task)) {
+        prompt = task.payload.description;
       } else {
         await this.deps.feedback.initHistory(worktree.path, payload.taskId, payload.description);
         prompt = await buildPromptFromTemplate({
@@ -432,14 +434,14 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
   }
 
   private async runScheduledCommand(
-    task: Task,
+    task: ScheduledTask,
     projectConfig: ProjectConfig,
     projectName: string,
     worktree: WorktreeInfo,
     startTime: number,
   ): Promise<boolean> {
     const { payload } = task;
-    const command = (payload as ScheduledPayload).scheduledCommand ?? "";
+    const command = payload.scheduledCommand ?? "";
 
     const abortController = new AbortController();
     const activeTask: ActiveTask = { task, process: null, worktree, startTime, abortController };
@@ -449,7 +451,7 @@ export class TaskRunner extends TypedEventEmitter<RunnerEvents> {
     const ctx = { taskId: payload.taskId, title: payload.title, project: projectName };
     await this.deps.lifecycle.recordStart(ctx);
 
-    const timeoutMs = (payload as ScheduledPayload).scheduleTimeout;
+    const timeoutMs = payload.scheduleTimeout;
 
     const p = this.deps.scheduledRunner.execute(
       task, projectConfig, projectName, worktree, command, startTime, timeoutMs,

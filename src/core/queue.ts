@@ -52,6 +52,17 @@ export interface RetryPayload extends BasePayload {
 
 export type TaskPayload = NewTaskPayload | FeedbackPayload | ScheduledPayload | RetryPayload;
 
+export type ScheduledTask = Task & { type: "scheduled"; payload: ScheduledPayload };
+export type FeedbackTask = Task & { type: "feedback"; payload: FeedbackPayload };
+
+export function isScheduledTask(task: Task): task is ScheduledTask {
+  return task.type === "scheduled";
+}
+
+export function isFeedbackTask(task: Task): task is FeedbackTask {
+  return task.type === "feedback";
+}
+
 const MAX_FAILED_ENTRIES = 10_000;
 
 export class TaskQueue {
@@ -129,7 +140,7 @@ export class TaskQueue {
 
   hasScheduleId(scheduleId: string): boolean {
     return this.tasks.some(
-      (t) => t.type === "scheduled" && (t.payload as ScheduledPayload).scheduleId === scheduleId,
+      (t) => isScheduledTask(t) && t.payload.scheduleId === scheduleId,
     );
   }
 
