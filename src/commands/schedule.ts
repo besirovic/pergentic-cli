@@ -100,9 +100,20 @@ export async function scheduleAdd(projectPath: string): Promise<void> {
 				const { schedulePromptPath } = await import("../config/paths.js");
 				const fullPath = schedulePromptPath(projectPath, relativePath);
 				const editor = resolveEditor();
-				await new Promise<void>((resolve) => {
+				await new Promise<void>((resolve, reject) => {
 					const child = spawn(editor, [fullPath], { stdio: "inherit" });
-					child.on("close", () => resolve());
+					const onSigint = () => {
+						child.kill("SIGTERM");
+					};
+					process.on("SIGINT", onSigint);
+					child.on("close", (code) => {
+						process.removeListener("SIGINT", onSigint);
+						resolve();
+					});
+					child.on("error", (err) => {
+						process.removeListener("SIGINT", onSigint);
+						reject(err);
+					});
 				});
 			} else {
 				const { schedulePromptPath } = await import("../config/paths.js");
