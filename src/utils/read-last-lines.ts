@@ -25,19 +25,19 @@ export function readLastLines(filePath: string, count: number): string[] {
 	}
 }
 
-function readLastLinesChunked(
+export function readLastLinesChunked(
 	fd: number,
 	fileSize: number,
 	count: number,
+	chunkSize = LIMITS.LOG_READ_CHUNK_BYTES,
 ): string[] {
-	const chunkSize = LIMITS.LOG_READ_CHUNK_BYTES;
 	const lines: string[] = [];
 	let remaining = "";
 	let position = fileSize;
 
 	while (position > 0 && lines.length < count) {
 		const readSize = Math.min(chunkSize, position);
-		position -= readSize;
+		position = Math.max(0, position - readSize);
 
 		const buffer = Buffer.alloc(readSize);
 		readSync(fd, buffer, 0, readSize, position);
