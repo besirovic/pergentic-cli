@@ -49,7 +49,6 @@ export function safeJsonParse<T>(filePath: string, fallback: T, schema?: z.ZodTy
 }
 
 export async function safeJsonParseAsync<T>(filePath: string, fallback: T, schema?: z.ZodType<T>): Promise<T> {
-  if (!existsSync(filePath)) return fallback;
   try {
     const raw = JSON.parse(await readFile(filePath, "utf-8"));
     if (schema) {
@@ -57,7 +56,10 @@ export async function safeJsonParseAsync<T>(filePath: string, fallback: T, schem
       return result.success ? result.data : fallback;
     }
     return raw as T;
-  } catch (err) {
+  } catch (err: unknown) {
+    if (typeof err === "object" && err !== null && (err as NodeJS.ErrnoException).code === "ENOENT") {
+      return fallback;
+    }
     logger.warn({ err, filePath }, "Corrupted JSON file, using fallback");
     return fallback;
   }
