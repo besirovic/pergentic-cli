@@ -81,6 +81,10 @@ export class DispatchLedger {
       const readStream = createReadStream(this.filePath, { encoding: "utf-8" });
       const writeStream = createWriteStream(tmpPath, { encoding: "utf-8" });
 
+      // Track errors during writes to prevent unhandled error events
+      let writeError: Error | null = null;
+      writeStream.on("error", (err) => { writeError = err; });
+
       const rl = createInterface({ input: readStream, crlfDelay: Infinity });
 
       for await (const line of rl) {
@@ -89,7 +93,9 @@ export class DispatchLedger {
         try {
           const entry = JSON.parse(trimmed) as LedgerEntry;
           if (new Date(entry.timestamp).getTime() >= cutoff) {
-            writeStream.write(trimmed + "\n");
+            if (!writeStream.destroyed) {
+              writeStream.write(trimmed + "\n");
+            }
             retainedIds.add(entry.id);
             retainedCount++;
           }
@@ -98,9 +104,14 @@ export class DispatchLedger {
         }
       }
 
+      // If stream already errored during writes, reject immediately
+      if (writeError) {
+        throw writeError;
+      }
+
       await new Promise<void>((resolve, reject) => {
+        writeStream.once("error", reject);
         writeStream.end(() => resolve());
-        writeStream.on("error", reject);
       });
 
       await rename(tmpPath, this.filePath);
