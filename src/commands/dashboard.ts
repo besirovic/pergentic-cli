@@ -35,7 +35,7 @@ export async function dashboard(): Promise<void> {
 				console.log(
 					`│  Today: ${s.tasks} tasks · ${
 						s.prs
-					} PRs · $${s.estimatedCost?.toFixed(2)}`.padEnd(49) + "│"
+					} PRs · $${(s.estimatedCost ?? 0).toFixed(2)}`.padEnd(49) + "│"
 				);
 			}
 
