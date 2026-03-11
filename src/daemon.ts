@@ -11,10 +11,11 @@ import { Poller } from "./core/poller";
 import { DispatchLedger } from "./core/ledger";
 import { Scheduler } from "./core/scheduler";
 import { acquireLock, releaseLock } from "./utils/health";
-import { pruneStats, STATS_RETENTION_DAYS } from "./core/cost";
-import { pruneEvents, MAX_EVENT_ENTRIES } from "./core/events";
+import { pruneStats } from "./core/cost";
+import { pruneEvents } from "./core/events";
 import { createDaemonServer, parseJsonBody } from "./utils/daemon-server";
 import { TaskSource, type ProjectConfig } from "./config/schema";
+import { DAEMON, LIMITS } from "./config/constants";
 import { z } from "zod";
 import type { Task, ScheduledPayload } from "./core/queue";
 import type { TaskProvider } from "./providers/types";
@@ -31,9 +32,6 @@ const CancelRequestSchema = z.object({
 	taskId: z.string().min(1).max(200),
 });
 
-const STATE_UPDATE_INTERVAL_MS = 3000;
-const SHUTDOWN_TIMEOUT_MS = 300_000;
-const STATS_CACHE_TTL_MS = 30_000;
 let shuttingDown = false;
 
 let statsCache: { data: { tasks: number; prs: number; failed: number; estimatedCost: number }; timestamp: number } | null = null;
@@ -84,8 +82,8 @@ async function main(): Promise<void> {
 	// Prune old data at startup
 	try {
 		await ledger.prune(30);
-		await pruneEvents(MAX_EVENT_ENTRIES);
-		await pruneStats(STATS_RETENTION_DAYS);
+		await pruneEvents(LIMITS.MAX_EVENT_ENTRIES);
+		await pruneStats(LIMITS.STATS_RETENTION_DAYS);
 	} catch (err) {
 		logger.warn({ err }, "Failed to prune old data");
 	}
@@ -151,7 +149,7 @@ async function main(): Promise<void> {
 	// State file update loop
 	const stateInterval = setInterval(() => {
 		updateState(runner, queue);
-	}, STATE_UPDATE_INTERVAL_MS);
+	}, DAEMON.STATE_UPDATE_INTERVAL_MS);
 
 	// HTTP server with router
 	const { server, get, post } = createDaemonServer();
@@ -216,7 +214,7 @@ async function main(): Promise<void> {
 		poller.stop();
 		clearInterval(stateInterval);
 
-		await runner.waitForAll(SHUTDOWN_TIMEOUT_MS);
+		await runner.waitForAll(DAEMON.SHUTDOWN_TIMEOUT_MS);
 
 		server.close();
 		updateState(runner, queue);
@@ -264,7 +262,7 @@ async function loadTodayStats(): Promise<{
 	failed: number;
 	estimatedCost: number;
 }> {
-	if (statsCache && Date.now() - statsCache.timestamp < STATS_CACHE_TTL_MS) {
+	if (statsCache && Date.now() - statsCache.timestamp < DAEMON.STATS_CACHE_TTL_MS) {
 		return statsCache.data;
 	}
 

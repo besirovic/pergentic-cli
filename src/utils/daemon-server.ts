@@ -1,7 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import type { ZodType } from "zod";
-
-const MAX_BODY_BYTES = 1_048_576; // 1 MB
+import { LIMITS } from "../config/constants";
 
 // Rate limit constants (requests per window)
 const STATUS_RATE_LIMIT = 120; // GET /status: 120 per minute
@@ -122,7 +121,7 @@ export function createDaemonServer(): {
         req.on("data", (chunk: Buffer) => {
           if (rejected) return;
           bodyBytes += chunk.length;
-          if (bodyBytes > MAX_BODY_BYTES) {
+          if (bodyBytes > LIMITS.MAX_BODY_BYTES) {
             rejected = true;
             res.writeHead(413).end();
             req.resume(); // drain remaining data

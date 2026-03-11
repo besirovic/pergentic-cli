@@ -4,10 +4,9 @@ import { TaskPriority } from "../core/queue";
 import { parseOwnerRepo } from "../core/git";
 import { logger } from "../utils/logger";
 import { fetchWithRetry } from "../utils/http";
-
+import { LIMITS } from "../config/constants";
 
 const GITHUB_API = "https://api.github.com";
-const COMMENT_POLL_WINDOW_MS = 120_000;
 
 interface GitHubIssue {
   number: number;
@@ -91,7 +90,7 @@ export class GitHubProvider extends BaseProvider {
 
     // Poll for PR comments on managed branches
     try {
-      const since = new Date(Date.now() - COMMENT_POLL_WINDOW_MS).toISOString();
+      const since = new Date(Date.now() - LIMITS.COMMENT_POLL_WINDOW_MS).toISOString();
       const commentsUrl = `${GITHUB_API}/repos/${parsed.owner}/${parsed.repo}/issues/comments?since=${since}&per_page=50`;
       const res = await this.githubFetch(commentsUrl);
 

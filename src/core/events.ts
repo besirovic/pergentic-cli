@@ -3,6 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { eventsFilePath } from "../config/paths";
 import { ensureGlobalConfigDir } from "../config/loader";
 import { safeAppendFileAsync } from "../utils/fs";
+import { LIMITS } from "../config/constants";
 
 export type LifecycleEventType =
 	| "taskStarted"
@@ -28,9 +29,7 @@ export async function recordEvent(event: LifecycleEvent): Promise<void> {
 	await safeAppendFileAsync(eventsFilePath(), JSON.stringify(event) + "\n");
 }
 
-export const MAX_EVENT_ENTRIES = 10_000;
-
-export async function pruneEvents(maxEntries: number = MAX_EVENT_ENTRIES): Promise<void> {
+export async function pruneEvents(maxEntries: number = LIMITS.MAX_EVENT_ENTRIES): Promise<void> {
 	const filePath = eventsFilePath();
 	if (!existsSync(filePath)) return;
 

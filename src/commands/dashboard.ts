@@ -1,7 +1,6 @@
 // TUI Dashboard - placeholder for Ink React implementation (task 8.3)
 import { readState } from "../utils/daemon-state";
-
-const DASHBOARD_REFRESH_INTERVAL_MS = 1000;
+import { TIMEOUTS } from "../config/constants";
 
 export async function dashboard(): Promise<void> {
 	// For now, simple polling display. Full Ink TUI in task 8.3.
@@ -66,7 +65,7 @@ export async function dashboard(): Promise<void> {
 					resolve();
 				}
 			}
-		}, DASHBOARD_REFRESH_INTERVAL_MS);
+		}, TIMEOUTS.DASHBOARD_REFRESH_MS);
 
 		const cleanup = () => {
 			clearInterval(interval);

@@ -1,6 +1,7 @@
 import { statsFilePath } from "../config/paths";
 import { ensureGlobalConfigDir } from "../config/loader";
 import { atomicWriteFileAsync, safeJsonParseAsync } from "../utils/fs";
+import { LIMITS } from "../config/constants";
 
 export interface TaskCostEntry {
   taskId: string;
@@ -87,9 +88,7 @@ export async function getTaskHistory(): Promise<TaskCostEntry[]> {
   return stats.taskHistory;
 }
 
-export const STATS_RETENTION_DAYS = 90;
-
-export async function pruneStats(maxDays: number = STATS_RETENTION_DAYS): Promise<void> {
+export async function pruneStats(maxDays: number = LIMITS.STATS_RETENTION_DAYS): Promise<void> {
   const stats = await loadStats();
   const cutoff = Date.now() - maxDays * 24 * 60 * 60 * 1000;
 

@@ -5,8 +5,7 @@ import { error } from "../utils/ui";
 import { loadGlobalConfig } from "../config/loader";
 import { readState, type DaemonState } from "../utils/daemon-state";
 import { formatDuration } from "../utils/format";
-
-const TUNNEL_ESTABLISH_DELAY_MS = 2000;
+import { TIMEOUTS } from "../config/constants";
 
 function getFreePort(): Promise<number> {
 	return new Promise((resolve, reject) => {
@@ -45,7 +44,7 @@ async function fetchRemoteStatus(remoteName: string): Promise<void> {
 	]);
 
 	// Wait for tunnel to establish
-	await new Promise((r) => setTimeout(r, TUNNEL_ESTABLISH_DELAY_MS));
+	await new Promise((r) => setTimeout(r, TIMEOUTS.SSH_TUNNEL_ESTABLISH_MS));
 
 	try {
 		const res = await fetch(`http://localhost:${localPort}/status`);
