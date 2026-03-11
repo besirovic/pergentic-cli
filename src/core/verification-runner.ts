@@ -3,6 +3,7 @@ import { postVerificationFailureComment } from "./comments";
 import { TaskLifecycle, type TaskContext } from "./task-lifecycle";
 import { spawnAgentAndWait, runVerificationCommands, buildVerificationFixPrompt } from "./verify";
 import { logger } from "../utils/logger";
+import { SIGKILL_DELAY_MS } from "../utils/process";
 import type { Task } from "./queue";
 import type { ProjectConfig } from "../config/schema";
 import type { WorktreeInfo } from "./worktree";
@@ -87,8 +88,13 @@ export class VerificationRunner {
       if (fixActiveEntry) {
         fixActiveEntry.process = fixHandle.process;
       } else {
-        // Task was cancelled during verification fix — kill immediately
-        fixHandle.process?.kill("SIGTERM");
+        // Task was cancelled during verification fix — kill and escalate to SIGKILL
+        const proc = fixHandle.process;
+        if (proc) {
+          proc.kill("SIGTERM");
+          const t = setTimeout(() => { try { proc.kill("SIGKILL"); } catch { /* already dead */ } }, SIGKILL_DELAY_MS);
+          t.unref();
+        }
         return false;
       }
       const fixResult = await fixHandle.result;
