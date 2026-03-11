@@ -5,14 +5,14 @@ import { promptTemplatePath } from "../config/paths";
 import type { Task } from "./queue";
 import type { ProjectConfig } from "../config/schema";
 import { logger } from "../utils/logger";
+import { LRUCache } from "../utils/lru-cache";
 import { detectPRTemplate, buildPRTemplatePromptSection } from "./pr-template";
 
 export type PromptTemplateContext = Record<PromptTemplateVar, string>;
 
 // Cache validated templates so we only warn once per file path.
-// Capped to prevent unbounded growth in long-running daemon processes.
-const MAX_VALIDATED_PATHS = 256;
-const validatedPaths = new Set<string>();
+// LRU-evicted to prevent unbounded growth in long-running daemon processes.
+const validatedPaths = new LRUCache<string, boolean>(256);
 
 /**
  * Build context object from task and project config.
@@ -77,10 +77,7 @@ export async function loadPromptTemplate(
 	const template = await readFile(fullPath, "utf-8");
 
 	if (!validatedPaths.has(fullPath)) {
-		if (validatedPaths.size >= MAX_VALIDATED_PATHS) {
-			validatedPaths.clear();
-		}
-		validatedPaths.add(fullPath);
+		validatedPaths.set(fullPath, true);
 		const unknownVars = validateTemplate(template);
 		if (unknownVars.length > 0) {
 			logger.warn(
