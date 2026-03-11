@@ -21,6 +21,12 @@ export class PRCreationService {
     projectConfig: ProjectConfig,
     worktree: WorktreeInfo,
   ): Promise<PRResult> {
+    if (!projectConfig.githubToken) {
+      throw new Error(
+        "GitHub token is required for PR creation. Set it via: pergentic init or PERGENTIC_GITHUB_TOKEN env var",
+      );
+    }
+
     const agentBody = await readAgentPRBody(worktree.path);
     const prDetails = buildPRDetails(task, projectConfig, agentBody);
     await commitAll(worktree.path, prDetails.commitMessage);
@@ -34,7 +40,7 @@ export class PRCreationService {
       body: prDetails.body,
       labels: projectConfig.pr?.labels,
       reviewers: projectConfig.pr?.reviewers,
-      githubToken: projectConfig.githubToken ?? "",
+      githubToken: projectConfig.githubToken,
     });
 
     await postTaskComments({
