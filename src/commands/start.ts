@@ -22,6 +22,21 @@ export function forkDaemon(): { pid: number; logFile: string } | null {
 	const out = openSync(logFile, "a");
 	const err = openSync(logFile, "a");
 
+	const closeFds = () => {
+		// Close parent's copies of the FDs; the child inherits its own copies.
+		// Ignore EBADF in case the FD was already closed during a partial fork failure.
+		try {
+			closeSync(out);
+		} catch (e: unknown) {
+			if ((e as NodeJS.ErrnoException).code !== "EBADF") throw e;
+		}
+		try {
+			closeSync(err);
+		} catch (e: unknown) {
+			if ((e as NodeJS.ErrnoException).code !== "EBADF") throw e;
+		}
+	};
+
 	try {
 		const child = fork(daemonPath, [], {
 			detached: true,
@@ -32,15 +47,18 @@ export function forkDaemon(): { pid: number; logFile: string } | null {
 		if (child.connected) child.disconnect();
 
 		if (child.pid) {
+			// Child has inherited its own copies of the FDs; close the parent's copies.
+			closeFds();
 			writePid(child.pid);
 			return { pid: child.pid, logFile };
 		}
 
+		closeFds();
 		return null;
-	} finally {
-		// Close parent's copies of the FDs; the child inherits its own copies.
-		closeSync(out);
-		closeSync(err);
+	} catch (e) {
+		// fork() threw — close the FDs the parent opened before re-throwing.
+		closeFds();
+		throw e;
 	}
 }
 
