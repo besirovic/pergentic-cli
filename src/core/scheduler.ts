@@ -87,7 +87,6 @@ export class Scheduler {
 	): Promise<void> {
 		const timestamp = now.toISOString();
 		const taskId = `schedule-${schedule.id}-${Date.now()}`;
-		let dispatched = false;
 
 		try {
 			let task: Task | undefined;
@@ -95,12 +94,14 @@ export class Scheduler {
 			if (schedule.type === "prompt") {
 				if (!schedule.prompt) {
 					logger.warn({ scheduleId: schedule.id }, "Schedule has no prompt path configured");
+					this.active.delete(schedule.id);
 					return;
 				}
 
 				const content = readPromptFile(projectPath, schedule.prompt);
 				if (!content || content.trim() === "" || content.trim() === PROMPT_TEMPLATE(schedule.name).trim()) {
 					logger.warn({ scheduleId: schedule.id, promptPath: schedule.prompt }, "Prompt file is empty or still contains template placeholder");
+					this.active.delete(schedule.id);
 					return;
 				}
 
@@ -126,6 +127,7 @@ export class Scheduler {
 			} else if (schedule.type === "command") {
 				if (!schedule.command) {
 					logger.warn({ scheduleId: schedule.id }, "Schedule has no command configured");
+					this.active.delete(schedule.id);
 					return;
 				}
 
@@ -150,20 +152,26 @@ export class Scheduler {
 				};
 			}
 
-			if (task && this.queue.add(task)) {
-				updateLastRun(projectPath, schedule.id, timestamp);
-				dispatched = true;
-				this.lastDispatched.set(schedule.id, now.getTime());
-				this.pruneLastDispatched();
-				logger.info({ scheduleId: schedule.id, taskId, project: projectName }, "Queued scheduled task");
+			if (task) {
+				const added = this.queue.add(task);
+				if (added) {
+					updateLastRun(projectPath, schedule.id, timestamp);
+					this.lastDispatched.set(schedule.id, now.getTime());
+					this.pruneLastDispatched();
+					logger.info({ scheduleId: schedule.id, taskId, project: projectName }, "Queued scheduled task");
+					// active stays set — clearActive() is called on task completion/failure
+				} else {
+					// queue.add() returned false: task already present (deduplication).
+					// Keep active set so the in-flight task's completion triggers clearActive(),
+					// which allows the scheduler to retry on the next cycle.
+					logger.debug({ scheduleId: schedule.id }, "Schedule already in queue, keeping active flag until task completes");
+				}
 			}
 		} catch (err) {
 			logger.error({ scheduleId: schedule.id, err }, "Failed to dispatch schedule, will retry next cycle");
 			this.queue.remove(taskId);
-		} finally {
-			if (!dispatched) {
-				this.active.delete(schedule.id);
-			}
+			// Clear active so the next cycle can retry this schedule.
+			this.active.delete(schedule.id);
 		}
 	}
 
