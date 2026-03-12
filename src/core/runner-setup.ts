@@ -67,7 +67,7 @@ export function buildExecutorContext(
 
   return {
     task, projectConfig, projectName, projectPath, worktree, startTime, signal,
-    setProcess: (proc) => { const e = activeMap.get(task.id); if (e) e.process = proc; },
+    setProcess: (proc) => { const e = activeMap.get(task.id); if (e && !e.cancelled) e.process = proc; },
     isActive: () => { const e = activeMap.get(task.id); return e !== undefined && !e.cancelled; },
     getActiveEntry: () => activeMap.get(task.id) ?? undefined,
     agent, agentName: parsedAgent,
