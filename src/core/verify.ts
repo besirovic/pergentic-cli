@@ -68,24 +68,36 @@ export function execCommand(
     let timedOut = false;
     let termTimer: ReturnType<typeof setTimeout> | undefined;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
+    let promiseTimer: ReturnType<typeof setTimeout> | undefined;
 
     registerChild(child);
 
     function cleanup() {
       if (termTimer) clearTimeout(termTimer);
       if (killTimer) clearTimeout(killTimer);
+      if (promiseTimer) clearTimeout(promiseTimer);
       unregisterChild(child);
     }
 
     if (timeoutMs) {
       termTimer = setTimeout(() => {
         timedOut = true;
-        child.kill("SIGTERM");
+        try { child.kill("SIGTERM"); } catch { /* already dead */ }
         killTimer = setTimeout(() => {
-          child.kill("SIGKILL");
+          try { child.kill("SIGKILL"); } catch { /* already dead */ }
         }, SIGKILL_DELAY_MS);
         killTimer.unref();
       }, timeoutMs);
+      // Fallback: force-resolve if close event never fires after SIGKILL
+      promiseTimer = setTimeout(() => {
+        cleanup();
+        resolve({
+          success: false,
+          output: `Command timed out after ${Math.floor(timeoutMs / 1000)}s`,
+          timedOut: true,
+        });
+      }, timeoutMs + SIGKILL_DELAY_MS + 5000);
+      promiseTimer.unref();
     }
 
     child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -223,27 +235,41 @@ export function spawnAgentAndWait(
 
   let termTimer: ReturnType<typeof setTimeout> | undefined;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
+  let promiseTimer: ReturnType<typeof setTimeout> | undefined;
 
   registerChild(child);
 
   function cleanup() {
     if (termTimer) clearTimeout(termTimer);
     if (killTimer) clearTimeout(killTimer);
+    if (promiseTimer) clearTimeout(promiseTimer);
     unregisterChild(child);
   }
 
   if (timeoutMs) {
     termTimer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
+      try { child.kill("SIGTERM"); } catch { /* already dead */ }
       killTimer = setTimeout(() => {
-        child.kill("SIGKILL");
+        try { child.kill("SIGKILL"); } catch { /* already dead */ }
       }, SIGKILL_DELAY_MS);
       killTimer.unref();
     }, timeoutMs);
   }
 
   const result = new Promise<SpawnResult>((resolve) => {
+    if (timeoutMs) {
+      // Fallback: force-resolve if close event never fires after SIGKILL
+      promiseTimer = setTimeout(() => {
+        cleanup();
+        resolve({
+          exitCode: 1,
+          stdout: "",
+          stderr: `Agent timed out after ${Math.floor(timeoutMs / 1000)}s and process cleanup failed`,
+        });
+      }, timeoutMs + SIGKILL_DELAY_MS + 5000);
+      promiseTimer.unref();
+    }
     child.on("close", (code) => {
       cleanup();
       const stdout = Buffer.concat(stdoutChunks).toString("utf-8").trim();
