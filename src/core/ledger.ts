@@ -20,6 +20,7 @@ interface LedgerEntry {
 export class DispatchLedger {
   private dispatched = new Set<string>();
   private filePath: string;
+  private lockChain: Promise<void> = Promise.resolve();
 
   constructor() {
     this.filePath = dispatchedLedgerPath();
@@ -87,19 +88,32 @@ export class DispatchLedger {
   }
 
   async markDispatched(id: string, type: "task" | "comment" = "task"): Promise<void> {
-    if (this.dispatched.has(id)) return;
-    this.dispatched.add(id);
-
-    const entry: LedgerEntry = {
-      id,
-      type,
-      timestamp: new Date().toISOString(),
-    };
+    // Serialize concurrent callers via a promise chain so the check-append-add
+    // sequence is atomic: no two callers can interleave between the has() check
+    // and the Set.add(), and the Set is only updated after a successful write.
+    const previous = this.lockChain;
+    let release!: () => void;
+    this.lockChain = new Promise<void>((resolve) => { release = resolve; });
 
     try {
-      await safeAppendFileAsync(this.filePath, JSON.stringify(entry) + "\n");
-    } catch (err) {
-      logger.error({ err, id }, "Failed to persist dispatch ledger entry");
+      await previous;
+
+      if (this.dispatched.has(id)) return;
+
+      const entry: LedgerEntry = {
+        id,
+        type,
+        timestamp: new Date().toISOString(),
+      };
+
+      try {
+        await safeAppendFileAsync(this.filePath, JSON.stringify(entry) + "\n");
+        this.dispatched.add(id);
+      } catch (err) {
+        logger.error({ err, id }, "Failed to persist dispatch ledger entry");
+      }
+    } finally {
+      release();
     }
   }
 
